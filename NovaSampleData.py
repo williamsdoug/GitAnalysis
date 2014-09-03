@@ -26,69 +26,70 @@
 # ###History
 # - 9/2/2014:  Updated corpus, used additional patch information from Jenkins to annotate commits with author jenkins@review.openstack.org.  Updated normalize_blame to handle null entries
 # - 9/3/2014:  Update nova_all_blame, filtering out all entries > 3000 diff lines that were contributing to huge file size
+# - 9/3/2014:  Corrected normalize_blame_by_commit computation, added normalize_blame_by_file
 
-## Code to load corpus
+## Code
 
 # In[1]:
 
-import gzip
-import json
-import pprint as pp
+from pprint import pprint
+from collections import defaultdict
+import sys
+sys.path.append('/Users/doug/ipython/git_analysis/dev')
+from jp_load_dump import jload
 
 
 # In[2]:
 
-def jload_helper(f):
-    #restore the object
-    result = []
-    dict_result = {}
-    for line in f:
-            v = json.loads(line)
-            if 'json_key' in v:
-                #individual entries are items in a dict:
-                k = v['json_key']
-                del v['json_key']
-                dict_result[k] = v
-                pass
-            else:
-                result.append(v)
-    if dict_result:
-        print 'returning dict'
-        return dict_result
-    elif len(result) > 1:
-        print 'returning list'
-        return result
-    elif len(result) == 1:
-        print 'returning singleton'
-        return result[0]
-    else:
-        return False
+def normalize_blame_by_commit(blameset, exp_weighting=True):
+    """returns list of commits with weighted blame based on proximity to changes"""
+    result = defaultdict(float)
+    total = 0
+    for per_file in blameset['blame'].values():
+        if per_file:       #validate not null entry
+            for per_line in per_file:
+                if exp_weighting:
+                    weight = 1.0/(2.0**(per_line['proximity']-1))
+                else:
+                    weight = 1.0/float(per_line['proximity'])
+                result[per_line['commit']] += weight
+                total += weight
+                
+    return dict([[k, v/total] for k, v in result.items()]) 
 
 
 # In[3]:
 
-def jload(name):
-    if name.endswith('z'):
-        print 'gzipped'
-        with gzip.open(name,'rb') as f:
-            return jload_helper(f)
-    else:
-        with open(name,'rb') as f:
-            return jload_helper(f)
+def normalize_blame_by_file(blameset, exp_weighting=True):
+    """returns list of files with weighted blame"""
+    result = defaultdict(float)
+    total = 0.0
+    for fname, per_file in blameset['blame'].items():
+        if per_file:       #validate not null entry
+            weight = 0.0
+            for per_line in per_file:
+                if exp_weighting:
+                    weight +=  1.0/(2.0**(per_line['proximity']-1))
+                else:
+                    weight += 1.0/float(per_line['proximity'])
+            result[fname] = weight
+            total += weight
+                
+    return dict([[k, v/total] for k, v in result.items()]) 
 
 
 ## Sample entry from nova_combined_commits.jsonz
 
 # In[4]:
 
-combined_commits = jload('nova_combined_commits.jsonz')
+combined_commits = jload('corpus/nova_combined_commits.jsonz')
 
 
 ####### Basic commit entry (without corresponsing Launchpad info)
 
 # In[5]:
 
-pp.pprint(combined_commits.items()[0])
+pprint(combined_commits.items()[0])
 
 
 # Entry associated with bug fix.  'g:' prefix is data from gerrit, 'lp:' prefix is data from launchpad.  All other fields from git commit
@@ -99,60 +100,39 @@ bug_fix_commits = [k for k,v in combined_commits.items() if 'lp:id' in v]
 print 'commits associated with big fixes:', len(bug_fix_commits)
 print bug_fix_commits[0]
 print
-pp.pprint (combined_commits[bug_fix_commits[0]] )
+pprint (combined_commits[bug_fix_commits[0]] )
 
 
 ## Sample entry from all_blame.jsonz
 
 # In[7]:
 
-all_blame = jload('nova_all_blame.jsonz')
+all_blame = jload('corpus/nova_all_blame.jsonz')
 
 
-# In[13]:
+# In[8]:
 
-pp.pprint(all_blame[1])
+pprint(all_blame[1])
 
 
 # #Normalize Blame Entry
-# 
-# Weight commits based on proximity to change.  Normalize to that overall weight is 0.  Normalization can either be reciprical of distance or exponential
 
 # In[9]:
 
-from collections import defaultdict
+normalize_blame_by_commit(all_blame[1], exp_weighting=True)
 
 
 # In[10]:
 
-def normalize_blame(blameset, exp_weighting=True):
-    """returns list of commits with weighted blame"""
-    result = defaultdict(float)
-    total = 0
-    for per_file in blameset['blame'].values():
-        if per_file:       #validate not null entry
-            for per_line in per_file:
-                total += 1
-                #print per_line
-                if exp_weighting:
-                    result[per_line['commit']] += 1.0/(2.0**(per_line['proximity']-1))
-                else:
-                    result[per_line['commit']] += 1.0/float(per_line['proximity'])
-                
-    return dict([[k, v/total] for k, v in result.items()]) 
+normalize_blame_by_commit(all_blame[1], exp_weighting=False)
 
 
-# In[14]:
+# In[11]:
 
-normalize_blame(all_blame[1], exp_weighting=True)
-
-
-# In[15]:
-
-normalize_blame(all_blame[1], exp_weighting=False)
+normalize_blame_by_file(all_blame[1], exp_weighting=True)
 
 
 # In[12]:
 
-
+normalize_blame_by_file(all_blame[1], exp_weighting=False)
 
