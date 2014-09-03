@@ -5,7 +5,7 @@
 # 
 # Copyright Doug Williams - 2014
 # 
-# ###Updated: 9/2/2014
+# ###Updated: 9/3/2014
 # 
 # ###Sources:
 # - Launchpad (https://launchpad.net/nova)
@@ -25,7 +25,7 @@
 # 
 # ###History
 # - 9/2/2014:  Updated corpus, used additional patch information from Jenkins to annotate commits with author jenkins@review.openstack.org.  Updated normalize_blame to handle null entries
-# - 9/2/2014: split nova_all_blame.jsonz into nova_all_blame_1.jsonz and nova_all_blame_2.jsonz to avoid gtithub size limit
+# - 9/3/2014:  Update nova_all_blame, filtering out all entries > 3000 diff lines that were contributing to huge file size
 
 ## Code to load corpus
 
@@ -106,12 +106,12 @@ pp.pprint (combined_commits[bug_fix_commits[0]] )
 
 # In[7]:
 
-all_blame = jload('nova_all_blame_1.jsonz') + jload('nova_all_blame_2.jsonz')
+all_blame = jload('nova_all_blame.jsonz')
 
 
-# In[18]:
+# In[13]:
 
-pp.pprint(all_blame[2])
+pp.pprint(all_blame[1])
 
 
 # #Normalize Blame Entry
@@ -142,17 +142,17 @@ def normalize_blame(blameset, exp_weighting=True):
     return dict([[k, v/total] for k, v in result.items()]) 
 
 
-# In[16]:
+# In[14]:
 
-normalize_blame(all_blame[2], exp_weighting=True)
-
-
-# In[17]:
-
-normalize_blame(all_blame[2], exp_weighting=False)
+normalize_blame(all_blame[1], exp_weighting=True)
 
 
-# In[ ]:
+# In[15]:
+
+normalize_blame(all_blame[1], exp_weighting=False)
+
+
+# In[12]:
 
 
 

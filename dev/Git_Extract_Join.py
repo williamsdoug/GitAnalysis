@@ -5,7 +5,7 @@
 # 
 # Currently configured for OpenStack, tested with Nova.
 # 
-# Last updated 9/1/2014
+# Last updated 9/3/2014
 # 
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in value uppercase
@@ -16,12 +16,14 @@
 #            blame fatal errors and excessive runtime
 # - 9/1/14:  consolidate top level routines into build_ and load_, introduce standard 
 #            naming based on project name, move code from iPython notebook to .py file
+# - 9/3/14:  Filter out huge blame entries (default is >3000 total lines per commit
 # 
 # Issues:
 # - None
 # 
 # To Do:
 # - get_patch_data(cid) hard-coded to nova, need to generalize for other projects
+# - remember huge commits to avoid recomputation during update
 #
 # Other:
 # - Installation: pip install -U gitpython==0.3.2.RC1
@@ -401,6 +403,15 @@ def compute_all_blame(bug_fix_commits, start = 0, limit = 1000000, repo_name='',
     return all_blame
 
 
+def filter_huge_blame(entry, threshold=3000):
+    total = 0
+    for fdat in entry['blame'].values():
+        if fdat:
+            x = len(fdat)
+            total += x
+    return total < threshold
+
+
 def build_all_blame(project, combined_commits, update=True, repo_name=''):
     """Top level routine to generate or update blame data"""
     global repo
@@ -419,11 +430,15 @@ def build_all_blame(project, combined_commits, update=True, repo_name=''):
             new_blame = list(new_blame)
             print
             all_blame = compute_all_blame(new_blame, repo_name=repo_name)
+            #prune huge entries
+            all_blame = [x for x in all_blame if  filter_huge_blame(x)]
             print 'saving'
             jdump(load_all_blame(project) + all_blame, project_to_fname(project, blame=True))
 
     else:
         all_blame = compute_all_blame(list(bug_fix_commits), repo_name=repo_name)
+        #prune huge entries
+        all_blame = [x for x in all_blame if  filter_huge_blame(x)]
         print 'saving'
         jdump(all_blame, project_to_fname(project, blame=True))
 
