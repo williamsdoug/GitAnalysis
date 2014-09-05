@@ -35,7 +35,7 @@
 from pprint import pprint
 from collections import defaultdict
 import sys
-sys.path.append('/Users/doug/ipython/git_analysis/dev')
+sys.path.append('./dev')
 from jp_load_dump import jload
 
 
