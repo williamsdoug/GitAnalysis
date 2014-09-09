@@ -5,7 +5,7 @@
 # 
 # Currently configured for OpenStack, tested with Nova.
 # 
-# Last updated 9/3/2014
+# Last updated 9/9/2014
 # 
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in value uppercase
@@ -17,6 +17,7 @@
 # - 9/1/14:  consolidate top level routines into build_ and load_, introduce standard 
 #            naming based on project name, move code from iPython notebook to .py file
 # - 9/3/14:  Filter out huge blame entries (default is >3000 total lines per commit
+# - 9/9/14:  Collect all file names
 # 
 # Issues:
 # - None
@@ -163,6 +164,7 @@ def process_commits(repo_name="/Users/doug/SW_Dev/nova", max_count=False):
                         'cid':c.hexsha,
                         'committer':convert_to_builtin_type(c.committer), 
                         'msg':c.message.encode('ascii', 'ignore'), 
+                        'files': process_commit_files(c),
                         'parents':[p.hexsha for p in c.parents]}
         #print '.',
         
@@ -174,6 +176,36 @@ def process_commits(repo_name="/Users/doug/SW_Dev/nova", max_count=False):
                 print total_operations,
         
     return commits
+
+
+def process_commit_files(c, filt=['py', 'sh', 'js', 'c', 'go', 'sh', 'conf']):
+    """Determine files associated with an individual commit"""
+    
+    files = []
+        
+    for p in c.parents:    #iterate through each parent
+        i = c.diff(p, create_patch=False)
+
+        for d in i.iter_change_type('A'): 
+            if d.b_blob and d.b_blob.path.split('.')[-1] in filt:       
+                files.append(d.b_blob.path)
+
+        for d in i.iter_change_type('D'): 
+            if d.a_blob and d.a_blob.path.split('.')[-1] in filt:       
+                files.append(d.a_blob.path)
+
+        for d in i.iter_change_type('R'): 
+            if d.a_blob and d.a_blob.path.split('.')[-1] in filt:       
+                files.append(d.a_blob.path) 
+            if d.b_blob and d.b_blob.path.split('.')[-1] in filt:       
+                files.append(d.b_blob.path)
+
+        for d in i.iter_change_type('M'): 
+            if d.b_blob and d.b_blob.path.split('.')[-1] in filt:       
+                files.append(d.b_blob.path)
+           
+    return files
+
 
 
 hdr_re = re.compile('@@\s+-(?P<nstart>\d+)(,(?P<nlen>\d+))?\s+\+(?P<pstart>\d+)(,(?P<plen>\d+))?\s+@@')
