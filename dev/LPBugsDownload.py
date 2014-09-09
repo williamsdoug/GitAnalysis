@@ -153,9 +153,9 @@ lp_excludes = {
 # Code
 #
 
-def project_to_fname(project):
+def project_to_fname(project, prefix='./Corpus/'):
     """Helper routine to create standard filename from project name"""
-    return project + "_lp_bugs.jsonz"
+    return prefix+project + "_lp_bugs.jsonz"
 
 def lp_fetch_object(obj, 
                     exclude=[], 

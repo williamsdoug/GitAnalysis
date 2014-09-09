@@ -67,15 +67,15 @@ repo = False
 # Helper
 #
 
-def project_to_fname(project, patches=False, combined=False, blame=False):
+def project_to_fname(project, patches=False, combined=False, blame=False, prefix='./Corpus/'):
     if patches:
-        return project + "_patch_data.jsonz"
+        return prefix + project + "_patch_data.jsonz"
     elif combined:
-        return project + "_combined_commits.jsonz"
+        return prefix + project + "_combined_commits.jsonz"
     elif blame:
-        return project + "_all_blame.jsonz"
+        return prefix + project + "_all_blame.jsonz"
     else:
-        return project + "_commits.jsonz"
+        return prefix + project + "_commits.jsonz"
 
 
 

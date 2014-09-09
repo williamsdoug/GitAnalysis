@@ -47,12 +47,12 @@ rest = GerritRestAPI(url='http://review.openstack.org')
 # Code
 #
 
-def project_to_fname(project, details=False):
+def project_to_fname(project, prefix='./Corpus/', details=False):
     """Helper function - converts project name to standardized file names """
     if details:
-        return project + "_change_details.jsonz"
+        return prefix + project + "_change_details.jsonz"
     else:
-        return project + "_changes.jsonz"
+        return prefix + project + "_changes.jsonz"
 
 def get_version():
     """Gets REST API version - not currently used """

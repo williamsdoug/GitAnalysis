@@ -1,29 +1,31 @@
-#
-# CreateCorpus.py - Top level code to create corpus for OpenStack Project
-#                   Note: This is a sample conversion of CreateCorpus.ipynb notebook
-#
-# Author:  Doug Williams - Copyright 2014 
-# 
-# Currently configured for OpenStack, tested with Nova.
-# 
-# Last updated 9/1/2014
-# 
-# History:
-# 0. 9/1/14: Converted from iPython notebook
-#
-# Issues:
-# -  None
-# 
-# To Do:
-# -  None
-#
+
 # coding: utf-8
+
+# #Master file to create Corpus
+# 
+# Author:  Doug Williams, Copyright 2014
+# 
+# Last Updated: 9/9/2014
+# 
+# Can either rebuild corpus from scratch, or apply updates incrementally.   Since some of the cata is downloaded from the web, there are a set of intermediate corpus that are also maintained.  These are later joined to produce the finl result
+# 
+# Intermediate Corpus:
+# - nova_change_details.jsonz
+# - nova_changes.jsonz
+# - nova_commits.jsonz
+# - nova_lp_bugs.jsonz
+# - nova_patch_data.jsonz
+# 
+# 
+# Output Corpus:
+# - nova_all_blame.jsonz
+# - nova_combined_commits.jsonz
 
 # In[1]:
 
 import pprint as pp
-#import sys
-#sys.path.append('~/ipython/launchpad/')
+import sys
+sys.path.append('./dev')
 
 from jp_load_dump import pdump, pload, jdump, jload
 
@@ -43,7 +45,7 @@ from Git_Extract_Join import build_all_blame, load_all_blame
 
 PROJECT = 'nova'
 REPO_NAME ='/Users/doug/SW_Dev/nova'
-CACHEDIR = '/Users/doug/ipython/launchpad/cache/'
+CACHEDIR = './cache/'
 UPDATE_CORPUS = False
 
 
@@ -117,10 +119,12 @@ print len(combined_commits)
 
 #### Compute Diff and Blame
 
+                if UPDATE_CORPUS:
+    build_all_blame(PROJECT, combined_commits, update=True, repo_name=REPO_NAME)
+                
 # In[8]:
 
-if UPDATE_CORPUS:
-    build_all_blame(PROJECT, combined_commits, update=True, repo_name=REPO_NAME)
+build_all_blame(PROJECT, combined_commits, update=False, repo_name=REPO_NAME)
 
 
 # In[9]:
@@ -129,7 +133,12 @@ all_blame = load_all_blame(PROJECT)
 print len(all_blame)
 
 
-# In[9]:
+# In[10]:
+
+#pp.pprint(all_blame[0])
+
+
+# In[10]:
 
 
 
