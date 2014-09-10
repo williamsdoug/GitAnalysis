@@ -5,10 +5,11 @@
 # 
 # Currently configured for OpenStack, tested with Nova.
 # 
-# Last updated 9/1/2014
+# Last updated 9/10/2014
 # 
 # History:
 # 0. 9/1/14: Converted from iPython notebook, added callable interfaces
+# 0. 9/10/14: Fix debug messages
 #
 # Issues:
 # -  None
@@ -194,7 +195,7 @@ def load_gerrit_changes(project='nova'):
     """Top level routine to load summary change data from disk"""
     name = project_to_fname(project)
     x = jload(name)
-    print 'Object type:', type(x)
+    #print 'Object type:', type(x)
     print 'total gerrit changes:', len(x)
     return x
     
@@ -202,7 +203,7 @@ def load_gerrit_change_details(project='nova'):
     """Top level routine to load detailed change data from disk"""
     name = project_to_fname(project, details=True)
     x = jload(name)
-    print 'Object type:', type(x)
+    #print 'Object type:', type(x)
     print 'total gerrit changes with detail:', len(x)
     return x
 

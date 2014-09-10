@@ -5,10 +5,11 @@
 # 
 # Currently configured for OpenStack, tested with Nova.
 # 
-# Last updated 9/1/2014
+# Last updated 9/10/2014
 # 
 # History:
 # 0. 9/1/14: Converted from iPython notebook, added callable interfaces
+# 0. 9/10/14: Fixed debug comments
 #
 # Issues:
 # -  None
@@ -354,7 +355,7 @@ def load_lp_bugs(project='nova'):
             found += 1
             x[k].update(ret)
     
-    print 'Object type:', type(x)
+    #print 'Object type:', type(x)
     print 'total LP bugs:', len(x)
     print 'Entries annotated:', found
 

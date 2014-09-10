@@ -1,4 +1,7 @@
-## Generic Dumper/Loader Routines
+# Generic Dumper/Loader Routines
+#
+# Author:  Doug Williams - Copyright 2014 
+# 
 
 import cPickle as pickle
 import gzip
@@ -24,7 +27,7 @@ def jdump_helper(x, f, item_per_line=True):
     skipped = 0
     #store the object
     if item_per_line and type(x) == list:
-        print type(x), 'is list'
+        #print type(x), 'is list'
         for v in x:
             try:
                 f.write(json.dumps(v,default=convert_to_builtin_type))
@@ -35,7 +38,7 @@ def jdump_helper(x, f, item_per_line=True):
                 #pp.pprint(v)
                 #raise Exception
     elif item_per_line and type(x) == dict:
-        print type(x), 'is dict'
+        #print type(x), 'is dict'
         for k, v in x.items():
             try:
                 v['json_key'] = k
@@ -68,10 +71,10 @@ def jload_helper(f):
             else:
                 result.append(v)
     if dict_result:
-        print 'returning dict'
+        #print 'returning dict'
         return dict_result
     elif len(result) > 1:
-        print 'returning list'
+        #print 'returning list'
         return result
     elif len(result) == 1:
         print 'returning singleton'
@@ -82,7 +85,7 @@ def jload_helper(f):
 
 def jdump(x, name, item_per_line=True):
     if name.endswith('z'):
-        print 'gzipped'
+        #print 'gzipped'
         with gzip.open(name,'wb') as f:
             jdump_helper(x, f, item_per_line=item_per_line)
     else:
@@ -92,7 +95,7 @@ def jdump(x, name, item_per_line=True):
 
 def jload(name):
     if name.endswith('z'):
-        print 'gzipped'
+        #print 'gzipped'
         with gzip.open(name,'rb') as f:
             return jload_helper(f)
     else:

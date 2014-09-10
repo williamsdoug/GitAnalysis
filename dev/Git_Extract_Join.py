@@ -5,7 +5,7 @@
 # 
 # Currently configured for OpenStack, tested with Nova.
 # 
-# Last updated 9/9/2014
+# Last updated 9/10/2014
 # 
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in value uppercase
@@ -18,6 +18,7 @@
 #            naming based on project name, move code from iPython notebook to .py file
 # - 9/3/14:  Filter out huge blame entries (default is >3000 total lines per commit
 # - 9/9/14:  Collect all file names
+# - 9/10/14:  Add exception handler to work-around unknown encoding error for process_commits
 # 
 # Issues:
 # - None
@@ -147,6 +148,7 @@ def parse_msg(msg, patch=False):
 def process_commits(repo_name="/Users/doug/SW_Dev/nova", max_count=False):
     """Extracts all commit from git repo, subject to max_count limit"""
     total_operations = 0
+    total_errors = 0
     global repo
     repo = Repo(repo_name)
     #repo = Repo(repo_name, odbt=GitCmdObjectDB)
@@ -159,21 +161,31 @@ def process_commits(repo_name="/Users/doug/SW_Dev/nova", max_count=False):
         #commits[cid] = {'author':c.author, 'date': c.committed_date, 'cid':c.hexsha,
         #                'committer':c.committer, 'msg':c.message, 
         #                'files':[], 'parents':[p.hexsha for p in c.parents]}
-        commits[cid] = {'author':convert_to_builtin_type(c.author), 
-                        'date': c.committed_date, 
-                        'cid':c.hexsha,
-                        'committer':convert_to_builtin_type(c.committer), 
-                        'msg':c.message.encode('ascii', 'ignore'), 
-                        'files': process_commit_files(c),
-                        'parents':[p.hexsha for p in c.parents]}
+        
+        try:
+            commits[cid] = {'author':convert_to_builtin_type(c.author), 
+                            'date': c.committed_date, 
+                            'cid':c.hexsha,
+                            'committer':convert_to_builtin_type(c.committer), 
+                            'msg':c.message.encode('ascii', 'ignore'), 
+                            'files': process_commit_files(c),
+                            'parents':[p.hexsha for p in c.parents]}
+        
+            commits[cid].update(parse_msg(c.message))
+            total_operations += 1
+            if total_operations % 100 == 0:
+                print '.',
+            if total_operations % 1000 == 0:
+                print total_operations,
+                
+        except Exception:
+            print 'x', 
+            total_errors += 1
         #print '.',
         
-        commits[cid].update(parse_msg(c.message))
-        total_operations += 1
-        if total_operations % 100 == 0:
-                print '.',
-        if total_operations % 1000 == 0:
-                print total_operations,
+    if total_errors > 0:
+        print
+        print 'Commits skipped due to error:', total_errors
         
     return commits
 
