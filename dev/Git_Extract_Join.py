@@ -5,7 +5,7 @@
 # 
 # Currently configured for OpenStack, tested with Nova.
 # 
-# Last updated 9/10/2014
+# Last updated 9/11/2014
 # 
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in value uppercase
@@ -18,7 +18,8 @@
 #            naming based on project name, move code from iPython notebook to .py file
 # - 9/3/14:  Filter out huge blame entries (default is >3000 total lines per commit
 # - 9/9/14:  Collect all file names
-# - 9/10/14:  Add exception handler to work-around unknown encoding error for process_commits
+# - 9/10/14: Add exception handler to work-around unknown encoding error for process_commits
+# - 9/11/14: Fix committer field in update_commits_with_patch_data
 # 
 # Issues:
 # - None
@@ -576,7 +577,7 @@ def update_commits_with_patch_data(commits, project='nova'):
         if 'pAuth' in patch:
             commits[cid]['author2'] = commits[cid]['author'] 
             commits[cid]['author'] = patch['pAuth']
-            commits[cid]['author'] = patch['pAuth']
+            commits[cid]['committer'] = patch['pAuth']
             
         if 'pSummary' in patch and 'msg' not in c:
             commits[cid]['msg'] = patch['pSummary']
