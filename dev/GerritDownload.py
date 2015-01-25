@@ -1,19 +1,21 @@
 #
-# GerritDownloader.py - Code to extract Gerrit review data for an OpenStack Project
+# GerritDownloader.py - Code to extract Gerrit review data
+#                       for an OpenStack Project
 #
-# Author:  Doug Williams - Copyright 2014 
-# 
+# Author:  Doug Williams - Copyright 2014, 2015
+#
 # Currently configured for OpenStack, tested with Nova.
-# 
-# Last updated 9/10/2014
-# 
+#
+# Last updated 1/25/2015
+#
 # History:
 # 0. 9/1/14: Converted from iPython notebook, added callable interfaces
 # 0. 9/10/14: Fix debug messages
+# 0. 1/25/15: PEP-8 clean-up
 #
 # Issues:
 # -  None
-# 
+#
 # To Do:
 # -  None
 #
@@ -35,9 +37,11 @@ from jp_load_dump import pdump, pload, jdump, jload
 #     source: https://pypi.python.org/pypi/pygerrit/0.2.1
 #     and https://gerrit-review.googlesource.com/Documentation/rest-api.html
 #
-#     sample gerrit query: http://review.gluster.org/#/q/project:glusterfs+branch:master+topic:bug-1100144,n,z
+#     sample gerrit query:
+# http://review.gluster.org/#/q/project:glusterfs+branch:master+topic:bug-1100144,n,z
 #
-#     Documentation for v 2.8 REST API: https://gerrit-documentation.storage.googleapis.com/Documentation/2.8/rest-api-changes.html#list-changes
+#     Documentation for v 2.8 REST API:
+# https://gerrit-documentation.storage.googleapis.com/Documentation/2.8/rest-api-changes.html#list-changes
 
 #
 # Globals
@@ -48,12 +52,14 @@ rest = GerritRestAPI(url='http://review.openstack.org')
 # Code
 #
 
+
 def project_to_fname(project, prefix='./Corpus/', details=False):
     """Helper function - converts project name to standardized file names """
     if details:
         return prefix + project + "_change_details.jsonz"
     else:
         return prefix + project + "_changes.jsonz"
+
 
 def get_version():
     """Gets REST API version - not currently used """
@@ -79,28 +85,27 @@ def get_all_changes(project="nova", prefix='openstack/', limit=1000000000):
     sortkey = ''
     count = 1
     query = "/changes/?q=project:{" + prefix + project + "}+is:merged"
-    
+
     while count > 0 and total < limit:
         if sortkey:
             suffix = '+resume_sortkey:'+sortkey
         else:
             suffix = ''
-            
-        #print query+suffix
+
+        # print query+suffix
         changes = rest.get(query+suffix)
-        
+
         count = len(changes)
         if count > 0:
             result += changes
             sortkey = changes[-1]['_sortkey']
         total += count
-        #print 'returned:', len(changes), 'total:', total
+        # print 'returned:', len(changes), 'total:', total
         print '.',
-    
+
     print
     print 'total changes:', total
     return result
-
 
 
 def get_change(changeno):
@@ -113,9 +118,12 @@ def get_change(changeno):
 def compress_vote_set(d):
     result = {}
     if 'all' in d:
-        result['all'] = [{'_account_id': z['_account_id'],'name':z['name'],'value':z['value']} for z in d['all'] if z['value'] != 0]
+        result['all'] = [{'_account_id': z['_account_id'],
+                          'name': z['name'], 'value': z['value']}
+                         for z in d['all'] if z['value'] != 0]
     if 'approved' in d:
-        result['approved'] = {'_account_id': d['approved']['_account_id'],'name':d['approved']['name']} 
+        result['approved'] = {'_account_id': d['approved']['_account_id'],
+                              'name': d['approved']['name']}
     if 'recommended' in d:
         result['recommended'] = d['recommended']
     if 'value' in d:
@@ -132,16 +140,17 @@ def compress_votes(d):
             result['Verified'] = compress_vote_set(d['Verified'])
     if 'Code-Review' in d:
             result['Code-Review'] = compress_vote_set(d['Code-Review'])
-        
+
     return result
 
 
 def compress_messages(messages):
     """Gets only messages for most recent change """
-    standard =     [msg for msg in messages if '_revision_number' in msg]
+    standard = [msg for msg in messages if '_revision_number' in msg]
     non_standard = [msg for msg in messages if '_revision_number' not in msg]
-    return [msg for msg in standard
-            if msg['_revision_number'] == standard[-1]['_revision_number']] + non_standard 
+    return ([msg for msg in standard
+             if msg['_revision_number'] == standard[-1]['_revision_number']]
+            + non_standard)
 
 
 def get_change_detail(changeno, _prune=True):
@@ -149,61 +158,62 @@ def get_change_detail(changeno, _prune=True):
     global rest
     query = "/changes/" + str(changeno) + '/detail'
     x = rest.get(query)
-    
+
     if _prune:
         x = prune(x)
 
-    return x 
+    return x
 
 
 def prune(x):
     """Trim extraneous data from Gerrit history """
-    #print x['_number']
+    # print x['_number']
     if '_sortkey' in x:
-        del x['_sortkey'] 
-    if 'id' in x:   
-        del x['id'] 
-    if 'kind' in x:   
-        del x['kind']    
+        del x['_sortkey']
+    if 'id' in x:
+        del x['id']
+    if 'kind' in x:
+        del x['kind']
     if 'removable_reviewers' in x:
-        del x['removable_reviewers']  
-    if 'permitted_labels' in x: 
-        del x['permitted_labels'] 
-        
+        del x['removable_reviewers']
+    if 'permitted_labels' in x:
+        del x['permitted_labels']
+
     owner = {}
     if '_account_id' in x['owner']:
         owner['_account_id'] = x['owner']['_account_id']
     if 'name' in x['owner']:
         owner['name'] = x['owner']['name']
-    x['owner']  = owner
-    
+    x['owner'] = owner
+
     x['labels'] = compress_votes(x['labels'])
-    
+
     try:
         x['messages'] = compress_messages(x['messages'])
     except Exception, e:
         print e
-        print  x['_number']
+        print x['_number']
         print type(x['messages'])
         pp.pprint(x['messages'])
         raise Exception
-    
-    return x 
+
+    return x
 
 
 def load_gerrit_changes(project='nova'):
     """Top level routine to load summary change data from disk"""
     name = project_to_fname(project)
     x = jload(name)
-    #print 'Object type:', type(x)
+    # print 'Object type:', type(x)
     print 'total gerrit changes:', len(x)
     return x
-    
+
+
 def load_gerrit_change_details(project='nova'):
     """Top level routine to load detailed change data from disk"""
     name = project_to_fname(project, details=True)
     x = jload(name)
-    #print 'Object type:', type(x)
+    # print 'Object type:', type(x)
     print 'total gerrit changes with detail:', len(x)
     return x
 
@@ -215,7 +225,7 @@ def build_all_changes(project='nova', update=False):
     name = project_to_fname(project)
     jdump(all_changes, name)
     return all_changes
-    
+
 
 def build_all_change_details(project='nova', update=False):
     """Top level routine to download detailed change data.
@@ -227,16 +237,18 @@ def build_all_change_details(project='nova', update=False):
         all_change_details = load_gerrit_change_details(project)
         print 'all_change_details:', len(all_change_details)
         found = dict([[x['change_id'], 1] for x in all_change_details])
-        missing = [str(x['_number']) for x in all_changes if x['change_id'] not in found]
-        
-        print 'Missing:',len(missing)
+        missing = [str(x['_number'])
+                   for x in all_changes if x['change_id'] not in found]
+
+        print 'Missing:', len(missing)
         all_change_details_plus = []
         i = 0
         skipped = 0
         for changeno in missing:
             try:
-                #time.sleep(0.03)
-                all_change_details_plus.append(get_change_detail(changeno, _prune=True))
+                # time.sleep(0.03)
+                all_change_details_plus.append(get_change_detail(changeno,
+                                                                 _prune=True))
             except Exception, e:
                 skipped += 1
             if i % 100 == 0:
@@ -263,7 +275,7 @@ def build_all_change_details(project='nova', update=False):
         jdump(all_change_details, name)
         return all_change_details
 
-    
+
 def build_gerrit_data(project='nova', update=True):
     """Top level routine for downloading or updating both summary change data
         and detailed change data.
