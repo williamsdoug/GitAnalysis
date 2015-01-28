@@ -28,7 +28,12 @@
 # - 1/23/15: replace depricated os.popen() is subprocess.Popen()
 # - 1/24/15: Changes to get_blame() to address fatal errors due to /dev/null
 #            files.
-# - 1/25/15: PEP-8 clean-up
+# - 1/25/15: PEP-8 clean-up. Added ranges to git blame calls.
+# - 1/25/15: Enabled use of multiprocessing in process_commit_details().
+#            Refactored APIs for assign_blame(), get_blame() and parse_diff()
+#            since multiprocessing.Pool requires that parameters in call to
+#            assign_blame() be picked for insertion in Queue
+# - 1/27/15: Created git_annotate_order() and supporting routines
 #
 # Issues:
 # - None
@@ -49,6 +54,8 @@
 #    from Git_Extract_Join import load_combined_commits
 #    from Git_Extract_Join import build_all_blame, load_all_blame
 #
+#    from Git_Extract_Join import get_git_master_commit, get_authors_and_files
+#
 
 from git import *
 import git
@@ -65,6 +72,7 @@ import urllib2
 
 from jp_load_dump import convert_to_builtin_type, pload, pdump, jload, jdump
 from subprocess import Popen, PIPE, STDOUT
+from multiprocessing import Pool
 
 
 #
@@ -245,15 +253,16 @@ hdr_re = re.compile('@@\s+-(?P<nstart>\d+)(,(?P<nlen>\d+))?\s+\+'
                     + '(?P<pstart>\d+)(,(?P<plen>\d+))?\s+@@')
 
 
-def parse_diff(d, proximity_limit=4):
+def parse_diff(diff_text, proximity_limit=4):
     """
     Parses individual git diff str, returns range and line proximity to changes
     """
+
     p_pos = 0
     n_pos = 0
     changes = []
     line_range = []
-    for line in d.diff.split('\n'):
+    for line in diff_text.split('\n'):
         # print line
         if line.startswith('@@'):
             # print line
@@ -332,8 +341,11 @@ def build_git_commits(project, repo_name=''):
     commits = process_commits(repo_name=repo_name)
     print
     print 'total commits:', len(commits)
-    print 'Augment GIT data with patch info'
-    update_commits_with_patch_data(commits, project=project)
+    print 'Augment Git data with patch info'
+    commits = update_commits_with_patch_data(commits, project=project)
+    print 'Augment Git data with ordering info'
+    git_annotate_order(commits, repo_name)
+    jdump(commits, project_to_fname(project))
 
 
 def load_git_commits(project='nova'):
@@ -363,32 +375,24 @@ def load_git_commits(project='nova'):
 #              http://stackoverflow.com/questions/5098256/git-blame-prior-commits
 
 
-def get_blame(cid, d, repo_name='/Users/doug/SW_Dev/nova',
-              child_cid='', warn=True):
+def get_blame(cid, path, repo_name='/Users/doug/SW_Dev/nova',
+              child_cid='', ranges=[],
+              include_cc=False, warn=False):
     """Compute per-line blame for individual file for a commit """
 
-    # skip null files
-    try:
-        if (str(d.a_blob) == git.objects.blob.Blob.NULL_HEX_SHA
-                or str(d.b_blob) == git.objects.blob.Blob.NULL_HEX_SHA
-                or d.a_blob.size == 0 or d.b_blob.size == 0):
-            return False
-    except Exception:
-        return False
-
-    path = d.b_blob.path
     result = []
     entry = {}
     first = True      # identifies first line in each porcelin group
-    cmd = 'cd ' + repo_name
-    # cmd += ' ; ' + 'git reset --soft ' + cid
-    # cmd += ' ; ' + 'git blame --line-porcelain ' + path
-    # cmd += ' ; ' + 'git blame --line-porcelain ' + cid + ' -- ' + path
 
-    cmd += ' ; ' + 'git blame --line-porcelain --follow ' + cid + ' -- ' + path
-    # cmd += ' ; ' + 'git blame --line-porcelain -C -C  ' + cid + ' -- ' + path
+    # Build git blame command string
+    cmd = 'cd ' + repo_name + ' ; ' + 'git blame --line-porcelain '
+    for r in ranges:         # Add line number ranges
+        cmd += '-L ' + str(r[0]) + ',' + str(r[1]) + ' '
+    if include_cc:           # Optionally identiified copied or moved sequences
+        cmd += '-C -C '
+    cmd += cid + ' -- ' + path   # specify commit and filename
 
-    # with os.popen(cmd) as f:
+    # Now execute git blame command in subprocess and parse results
     with Popen(cmd, shell=True, stdout=PIPE, stderr=STDOUT).stdout as f:
         for line in f:
             try:
@@ -404,25 +408,17 @@ def get_blame(cid, d, repo_name='/Users/doug/SW_Dev/nova',
                     print line,
                     print 'child cid:', child_cid
                     print 'parent cid:', cid
-                    if d.b_blob.path != d.a_blob.path:
-                        print 'b:', d.b_blob.path
-                        print 'a:', d.a_blob.path
                 return False
 
-            # line = line.encode('utf-8', errors='ignore')
-            # print line
             if first:
                 line = line[:-1]    # strip newline
                 v = line.split(' ')
                 entry['commit'] = v[0]
                 entry['orig_lineno'] = v[1]
                 entry['lineno'] = v[2]
-                # print 'first: ', v
                 first = False
             elif line[0] == '\t':
-                # print entry['lineno']
                 entry['text'] = line[1:].strip()
-
                 result.append(entry)
                 entry = {}
                 first = True
@@ -435,35 +431,48 @@ def get_blame(cid, d, repo_name='/Users/doug/SW_Dev/nova',
                 except Exception, e:
                     pass
     if len(result) == 0:
-        # print
-        print 'Warning -- Empty Blame for ', cid, path
-        # with os.popen(cmd) as f:
-        #    for line in f:
-        #        print line
+        if warn:
+            print 'Warning -- Empty Blame for ', cid, path
         return False
     return result
 
 
-def assign_blame(d, p_cid, repo_name='', child_cid=''):
+def find_diff_ranges(entries):
+    """Extracts range of relevant line numbers from parse_diff result"""
+    ranges = []
+    start = -1
+    end = -1
+
+    for e in entries:
+        if e['lineno'] != end + 1:  # find discontinuity
+            if start != -1:         # skip if first entry
+                ranges.append([start, end])
+            start = e['lineno']
+        end = e['lineno']
+
+    ranges.append([start, end])     # include final entry
+    return ranges
+
+
+def assign_blame(path, diff_text, p_cid, repo_name='', child_cid=''):
     """Combine diff with blame for a file"""
     try:
-        result = parse_diff(d)
+        result = parse_diff(diff_text)
+        ranges = find_diff_ranges(result)
+
         # now annotate with blame information
-
-        # blame = dict([(int(x['lineno']), x)
-        #              for x in get_blame(p_cid, d.b_blob.path,
-        #                                 repo_name=repo_name)])
-
         blame = dict([(int(x['lineno']), x)
-                      for x in get_blame(p_cid, d, repo_name=repo_name,
-                                         child_cid=child_cid)])
+                      for x in get_blame(p_cid, path,
+                                         repo_name=repo_name,
+                                         child_cid=child_cid,
+                                         ranges=ranges)])
         result = [dict(x.items() + [['commit', blame[x['lineno']]['commit']]])
                   for x in result if x['lineno'] in blame]
 
-        return [d.b_blob.path, result]
+        return [path, result]
 
     except Exception:
-        return [d.b_blob.path, False]
+        return [path, False]
 
 
 def process_commit_details(cid, repo_name='',
@@ -472,21 +481,26 @@ def process_commit_details(cid, repo_name='',
        Exclude non-source files
     """
     global repo
-
     c = repo.commit(cid)
-    blame = []
+    pool = Pool()
 
-    for p in c.parents:    # iterate through each parent
-        i = c.diff(p, create_patch=True)
-
-        for d in i.iter_change_type('M'):
-            if d.b_blob and d.b_blob.path.split('.')[-1] in filt:
-                blame.append(assign_blame(d, p.hexsha,
-                                          repo_name=repo_name, child_cid=cid))
-
-        # blame += [assign_blame(d,p.hexsha,repo_name=repo_name)
-        #           for d in i.iter_change_type('M') if d.b_blob]
-
+    # blame = [assign_blame(d.b_blob.path, d.diff, p.hexsha,
+    #                       repo_name=repo_name, child_cid=cid)
+    output = [pool.apply_async(assign_blame,
+                               args=(d.b_blob.path, d.diff, p.hexsha,
+                                     repo_name, cid))
+              for p in c.parents    # iterate through each parent
+              for d in c.diff(p, create_patch=True).iter_change_type('M')
+              if (d.a_blob and d.b_blob
+                  and d.b_blob.path.split('.')[-1] in filt
+                  and str(d.a_blob) != git.objects.blob.Blob.NULL_HEX_SHA
+                  and str(d.b_blob) != git.objects.blob.Blob.NULL_HEX_SHA
+                  and d.a_blob.size != 0
+                  and d.b_blob.size != 0)
+              ]
+    blame = [p.get() for p in output]
+    pool.close()
+    pool.join()
     return dict(blame)
 
 
@@ -654,7 +668,7 @@ def update_commits_with_patch_data(commits, project='nova'):
         if 'pSummary' in patch and 'msg' not in c:
             commits[cid]['msg'] = patch['pSummary']
 
-    jdump(commits, project_to_fname(project))
+    return commits
 
 
 #
@@ -726,3 +740,98 @@ def build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,
 def load_combined_commits(project):
     """Loads combined_commit data from disk"""
     return jload(project_to_fname(project, combined=True))
+
+#
+# Routines to annotate commits by order of change
+#
+
+
+def git_annotate_commit_order(commits, repo_name):
+    """Order of change within overall project - project maturity"""
+    repo = Repo(repo_name)
+
+    for k in commits.keys():    # Set initial value
+        commits[k]['order'] = -1
+
+    ordered_commits = [c.hexsha for c in repo.iter_commits('master')]
+    ordered_commits.reverse()
+
+    for i, k in enumerate(ordered_commits):
+        commits[k]['order'] = i + 1  # +1, enumerate starts with 0
+
+
+def git_annotate_author_order(commits):
+    """Order of change by author - author maturity"""
+    author_commits = collections.defaultdict(list)
+
+    for k, c in commits.items():
+        author_commits[c['author']].append((c['order'], k))
+
+    for author, val in author_commits.items():
+        for i, (order, c) in enumerate(sorted(val, key=lambda x: x[0])):
+            commits[c]['author_order'] = i + 1
+
+
+def git_annotate_file_order(commits):
+    """Order of change by file - file maturity"""
+    file_commits = collections.defaultdict(list)
+
+    for k, c in commits.items():
+        for fname in c['files']:
+            file_commits[fname].append((c['order'], k))
+        c['file_order'] = {}    # Use this as opportunity to tack on new field
+
+    for fname, val in file_commits.items():
+        for i, (order, c) in enumerate(sorted(val, key=lambda x: x[0])):
+            commits[c]['file_order'][fname] = i + 1
+
+
+def git_annotate_file_order_by_author(commits):
+    """Order of change by file by author - author/file maturity"""
+    file_commits_by_author = collections.defaultdict(
+        lambda: collections.defaultdict(list))
+
+    for k, c in commits.items():
+        for fname in c['files']:
+            file_commits_by_author[fname][c['author']].append((c['order'], k))
+            # Use this as opportunity to tack on new field
+        c['file_order_for_author'] = {}
+
+    for fname, entry in file_commits_by_author.items():
+        for author, val in entry.items():
+            for i, (order, c) in enumerate(sorted(val, key=lambda x: x[0])):
+                commits[c]['file_order_for_author'][fname] = i + 1
+
+
+def git_annotate_order(commits, repo_name):
+    """ Annotates commits with ordering information
+        - Overall commit order
+        - Order of commit on a per-file basis
+        - Order of commits by author
+        - Order of commits by author on per-file basis
+    """
+    git_annotate_commit_order(commits, repo_name)
+    git_annotate_author_order(commits)
+    git_annotate_file_order(commits)
+    git_annotate_file_order_by_author(commits)
+
+#
+# ------ Other Helper Routes, not currently used --------
+#
+
+
+def get_git_master_commit(repo_name):
+    """Returns ID of most recent commit"""
+    repo = Repo(repo_name)
+    return repo.heads.master.commit.hexsha
+
+
+def get_authors_and_files(commits):
+    """Returns all unique authors and all unique files (naieve to rename) """
+    authors = {}
+    files = {}
+    for c in commits.values():
+        authors[c['author']] = 1
+        for fn in c['files']:
+            files[fn] = 1
+    return authors.keys(), files.keys()
