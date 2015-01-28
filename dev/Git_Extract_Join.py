@@ -4,9 +4,9 @@
 #
 # Author:  Doug Williams - Copyright 2014, 2015
 #
-# Currently configured for OpenStack, tested with Nova.
+# Currently configured for OpenStack, tested with Nova and Swift.
 #
-# Last updated 1/24/2014
+# Last updated 1/28/2014
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -34,13 +34,14 @@
 #            since multiprocessing.Pool requires that parameters in call to
 #            assign_blame() be picked for insertion in Queue
 # - 1/27/15: Created git_annotate_order() and supporting routines
+# - 1/28/15: Removed nova as default project, clean-up defaults for
+#            repo_name and project.  Remove nona hard-coding from
+#            get_patch_data()
 #
 # Issues:
 # - None
 #
 # To Do:
-# - get_patch_data(cid) hard-coded to nova, need to generalize for
-#   other projects
 # - remember huge commits to avoid recomputation during update
 #
 # Other:
@@ -174,7 +175,7 @@ def parse_msg(msg, patch=False):
 # Basic Commit Processing
 #
 
-def process_commits(repo_name="/Users/doug/SW_Dev/nova", max_count=False):
+def process_commits(repo_name, max_count=False):
     """Extracts all commit from git repo, subject to max_count limit"""
     total_operations = 0
     total_errors = 0
@@ -336,20 +337,21 @@ def parse_diff(diff_text, proximity_limit=4):
     return sorted([x for x in result if x['lineno'] in window])
 
 
-def build_git_commits(project, repo_name=''):
+def build_git_commits(project, repo_name):
     """Top level routine to generate commit data """
-    commits = process_commits(repo_name=repo_name)
+    commits = process_commits(repo_name)
     print
     print 'total commits:', len(commits)
     print 'Augment Git data with patch info'
-    commits = update_commits_with_patch_data(commits, project=project)
+    commits = update_commits_with_patch_data(commits, project)
     print 'Augment Git data with ordering info'
     git_annotate_order(commits, repo_name)
     jdump(commits, project_to_fname(project))
 
 
-def load_git_commits(project='nova'):
+def load_git_commits(project):
     """Top level routine to load commit data, returns dict indexed by cid"""
+
     name = project_to_fname(project)
 
     result = jload(name)
@@ -375,10 +377,13 @@ def load_git_commits(project='nova'):
 #              http://stackoverflow.com/questions/5098256/git-blame-prior-commits
 
 
-def get_blame(cid, path, repo_name='/Users/doug/SW_Dev/nova',
+def get_blame(cid, path, repo_name=False,
               child_cid='', ranges=[],
               include_cc=False, warn=False):
     """Compute per-line blame for individual file for a commit """
+
+    if not repo_name:
+        raise Exception
 
     result = []
     entry = {}
@@ -504,7 +509,7 @@ def process_commit_details(cid, repo_name='',
     return dict(blame)
 
 
-def compute_all_blame(bug_fix_commits, start=0, limit=1000000, repo_name='',
+def compute_all_blame(bug_fix_commits, repo_name, start=0, limit=1000000,
                       keep=set(['lineno', 'orig_lineno', 'commit', 'text'])):
     """Top level iterator for computing diff & blame for a list of commits"""
     progress = 0
@@ -539,7 +544,7 @@ def filter_huge_blame(entry, threshold=3000):
     return total < threshold
 
 
-def build_all_blame(project, combined_commits, update=True, repo_name=''):
+def build_all_blame(project, combined_commits, repo_name, update=True):
     """Top level routine to generate or update blame data"""
     global repo
     repo = Repo(repo_name)
@@ -556,7 +561,7 @@ def build_all_blame(project, combined_commits, update=True, repo_name=''):
         if len(new_blame) > 0:
             new_blame = list(new_blame)
             print
-            all_blame = compute_all_blame(new_blame, repo_name=repo_name)
+            all_blame = compute_all_blame(new_blame, repo_name)
             # prune huge entries
             all_blame = [x for x in all_blame if filter_huge_blame(x)]
             print 'saving'
@@ -564,8 +569,7 @@ def build_all_blame(project, combined_commits, update=True, repo_name=''):
                   project_to_fname(project, blame=True))
 
     else:
-        all_blame = compute_all_blame(list(bug_fix_commits),
-                                      repo_name=repo_name)
+        all_blame = compute_all_blame(list(bug_fix_commits), repo_name)
         # prune huge entries
         all_blame = [x for x in all_blame if filter_huge_blame(x)]
         print 'saving'
@@ -588,11 +592,13 @@ def identify_jenkins_commit(commits):
             if 'jenkins@review.openstack.org' in c['author']]
 
 
-def get_patch_data(cid):
+def get_patch_data(cid, project):
     """Downloads supplementary patch data from OpenStack cgit """
-    base = 'http://git.openstack.org/cgit/openstack/nova/patch/?id='
+    # base = 'http://git.openstack.org/cgit/openstack/nova/patch/?id='
+    template = 'http://git.openstack.org/cgit/openstack/{0}/patch/?id={1}'
     try:
-        f = urllib2.urlopen(urllib2.Request(base+cid))
+        # f = urllib2.urlopen(urllib2.Request(base+cid))
+        f = urllib2.urlopen(urllib2.Request(template.format(project, cid)))
         result = f.read()
         f.close()
         return result.split('diff --git')[0]
@@ -600,7 +606,7 @@ def get_patch_data(cid):
         return False
 
 
-def load_patch_data(jenkins_commits, project='nova', incremental=True):
+def load_patch_data(jenkins_commits, project, incremental=True):
     """Downloads supplementary patch data for a set of commits """
     name = project_to_fname(project, patches=True)
     count = 0
@@ -622,7 +628,7 @@ def load_patch_data(jenkins_commits, project='nova', incremental=True):
         return patch_data
 
     for cid in delta_commits:
-        patch_data.append({'cid': cid, 'patch': get_patch_data(cid)})
+        patch_data.append({'cid': cid, 'patch': get_patch_data(cid, project)})
 
         count += 1
         if count % 10 == 0:
@@ -636,7 +642,7 @@ def load_patch_data(jenkins_commits, project='nova', incremental=True):
     return patch_data
 
 
-def update_commits_with_patch_data(commits, project='nova'):
+def update_commits_with_patch_data(commits, project):
     """Highest level routine - identifies all commits with jenkins author and
        augments metadata with cgit patch data
     """
@@ -645,7 +651,7 @@ def update_commits_with_patch_data(commits, project='nova'):
     jenkins_commits = identify_jenkins_commit(commits)
     patch_commits = dict([(x['cid'], parse_msg(x['patch'], patch=True))
                           for x in load_patch_data(jenkins_commits,
-                                                   project=project,
+                                                   project,
                                                    incremental=True)])
 
     # merge information into commits
