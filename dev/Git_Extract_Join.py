@@ -6,7 +6,7 @@
 #
 # Currently configured for OpenStack, tested with Nova and Swift.
 #
-# Last updated 1/28/2014
+# Last updated 2/3/2014
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -19,6 +19,8 @@
 # - 9/1/14:  consolidate top level routines into build_ and load_, introduce
 #            standard naming based on project name, move code from iPython
 #            notebook to .py file
+# - 9/2/14:  Use additional patch information from Jenkins to annotate
+#            commits with author jenkins@review.openstack.org
 # - 9/3/14:  Filter out huge blame entries (default is >3000 total lines per
 #            commit
 # - 9/9/14:  Collect all file names
@@ -35,19 +37,13 @@
 #            assign_blame() be picked for insertion in Queue
 # - 1/27/15: Created git_annotate_order() and supporting routines
 # - 1/28/15: Removed nova as default project, clean-up defaults for
-#            repo_name and project.  Remove nona hard-coding from
+#            repo_name and project.  Remove nova hard-coding from
 #            get_patch_data()
-#
-# Issues:
-# - None
-#
-# To Do:
-# - remember huge commits to avoid recomputation during update
-#
-# Other:
-# - Installation: pip install -U gitpython==0.3.2.RC1
-# - see fix for blame:
-# https://github.com/vitalif/GitPython/commit/104524267b616934983fff89ff112970febac68e
+# - 1/30/15: Added annotate_commit_loc().  Computes lines-of-code-changed
+#            for each commit.
+# - 2/3/15 - Add update option to build_git_commits()
+# - 2/3/15 - Eliminate use of globals
+# - 2/3/15 - Enhanced build_all_blame to avoid re-computing large blame entries
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -75,21 +71,10 @@ from jp_load_dump import convert_to_builtin_type, pload, pdump, jload, jdump
 from subprocess import Popen, PIPE, STDOUT
 from multiprocessing import Pool
 
-
-#
-# Globals
-#
-
-global commits
-commits = collections.defaultdict(list)
-
-global repo
-repo = False
-
-
 #
 # Helper
 #
+
 
 def project_to_fname(project, patches=False, combined=False,
                      blame=False, prefix='./Corpus/'):
@@ -175,23 +160,15 @@ def parse_msg(msg, patch=False):
 # Basic Commit Processing
 #
 
-def process_commits(repo_name, max_count=False):
+def process_commits(repo, commits, max_count=False):
     """Extracts all commit from git repo, subject to max_count limit"""
     total_operations = 0
     total_errors = 0
-    global repo
-    repo = Repo(repo_name)
-    # repo = Repo(repo_name, odbt=GitCmdObjectDB)
-    assert repo.bare is False
-    global commits
-    commits = collections.defaultdict(list)
 
     for c in repo.iter_commits('master', max_count=max_count):
         cid = c.hexsha
-        # commits[cid] = {'author':c.author, 'date': c.committed_date,
-        #                 'cid':c.hexsha,
-        #                'committer':c.committer, 'msg':c.message,
-        #                'files':[], 'parents':[p.hexsha for p in c.parents]}
+        if cid in commits:
+            continue
 
         try:
             commits[cid] = {'author': convert_to_builtin_type(c.author),
@@ -212,7 +189,6 @@ def process_commits(repo_name, max_count=False):
         except Exception:
             print 'x',
             total_errors += 1
-        # print '.',
 
     if total_errors > 0:
         print
@@ -337,15 +313,28 @@ def parse_diff(diff_text, proximity_limit=4):
     return sorted([x for x in result if x['lineno'] in window])
 
 
-def build_git_commits(project, repo_name):
+def build_git_commits(project, repo_name, update=True):
     """Top level routine to generate commit data """
-    commits = process_commits(repo_name)
+
+    repo = Repo(repo_name)
+    assert repo.bare is False
+
+    if update:
+        commits = load_git_commits(project)
+    else:
+        commits = collections.defaultdict(list)
+
+    commits = process_commits(repo, commits)
     print
     print 'total commits:', len(commits)
     print 'Augment Git data with patch info'
     commits = update_commits_with_patch_data(commits, project)
+    print
     print 'Augment Git data with ordering info'
     git_annotate_order(commits, repo_name)
+    print
+    print 'Augment Git data with lines-of-code changed'
+    annotate_commit_loc(commits, repo_name)
     jdump(commits, project_to_fname(project))
 
 
@@ -353,14 +342,8 @@ def load_git_commits(project):
     """Top level routine to load commit data, returns dict indexed by cid"""
 
     name = project_to_fname(project)
-
     result = jload(name)
-    # normalize change_id to begin with upper case I
-    # for k, v in result.items():
-    #    if 'Change-Id' in v and  v['Change-Id'].startswith('i'):
-    #        result[k]['Change-Id'] = 'I' + v['Change-Id'][1:]
 
-    print 'Object type:', type(result)
     print 'total git_commits:', len(result)
     print 'bug fix commits:', len([x for x in result.values() if 'bug' in x])
     print 'commits with change_id:', len([x for x in result.values()
@@ -377,13 +360,10 @@ def load_git_commits(project):
 #              http://stackoverflow.com/questions/5098256/git-blame-prior-commits
 
 
-def get_blame(cid, path, repo_name=False,
+def get_blame(cid, path, repo_name,
               child_cid='', ranges=[],
               include_cc=False, warn=False):
     """Compute per-line blame for individual file for a commit """
-
-    if not repo_name:
-        raise Exception
 
     result = []
     entry = {}
@@ -459,7 +439,7 @@ def find_diff_ranges(entries):
     return ranges
 
 
-def assign_blame(path, diff_text, p_cid, repo_name='', child_cid=''):
+def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
     """Combine diff with blame for a file"""
     try:
         result = parse_diff(diff_text)
@@ -467,8 +447,7 @@ def assign_blame(path, diff_text, p_cid, repo_name='', child_cid=''):
 
         # now annotate with blame information
         blame = dict([(int(x['lineno']), x)
-                      for x in get_blame(p_cid, path,
-                                         repo_name=repo_name,
+                      for x in get_blame(p_cid, path, repo_name,
                                          child_cid=child_cid,
                                          ranges=ranges)])
         result = [dict(x.items() + [['commit', blame[x['lineno']]['commit']]])
@@ -480,17 +459,17 @@ def assign_blame(path, diff_text, p_cid, repo_name='', child_cid=''):
         return [path, False]
 
 
-def process_commit_details(cid, repo_name='',
+def process_commit_details(cid, repo, repo_name,
                            filt=['py', 'sh', 'js', 'c', 'go', 'sh', 'conf']):
     """Process individual commit, computing diff and identifying blame.
        Exclude non-source files
     """
-    global repo
+
     c = repo.commit(cid)
     pool = Pool()
 
     # blame = [assign_blame(d.b_blob.path, d.diff, p.hexsha,
-    #                       repo_name=repo_name, child_cid=cid)
+    #                       repo_name, cid)
     output = [pool.apply_async(assign_blame,
                                args=(d.b_blob.path, d.diff, p.hexsha,
                                      repo_name, cid))
@@ -509,21 +488,16 @@ def process_commit_details(cid, repo_name='',
     return dict(blame)
 
 
-def compute_all_blame(bug_fix_commits, repo_name, start=0, limit=1000000,
+def compute_all_blame(bug_fix_commits, repo, repo_name, start=0, limit=1000000,
                       keep=set(['lineno', 'orig_lineno', 'commit', 'text'])):
     """Top level iterator for computing diff & blame for a list of commits"""
     progress = 0
     all_blame = []
 
-    # code for debug, remove later
-    if repo_name:
-        global repo
-        repo = Repo(repo_name)
-
     for cid in bug_fix_commits[start:start+limit]:
         all_blame.append(
             {'cid': cid,
-             'blame': process_commit_details(cid, repo_name=repo_name)})
+             'blame': process_commit_details(cid, repo, repo_name)})
 
         progress += 1
         # if progress % 100 == 0:
@@ -535,20 +509,20 @@ def compute_all_blame(bug_fix_commits, repo_name, start=0, limit=1000000,
     return all_blame
 
 
-def filter_huge_blame(entry, threshold=3000):
+def prune_huge_blame(entry, threshold=3000):
     total = 0
     for fdat in entry['blame'].values():
         if fdat:
             x = len(fdat)
             total += x
-    return total < threshold
+    if total >= threshold:
+        entry['blame'] = {}
 
 
 def build_all_blame(project, combined_commits, repo_name, update=True):
     """Top level routine to generate or update blame data"""
-    global repo
-    repo = Repo(repo_name)
 
+    repo = Repo(repo_name)
     bug_fix_commits = set([k for k, v in combined_commits.items()
                            if 'lp:id' in v])
     print 'bug fix commits:', len(bug_fix_commits)
@@ -557,23 +531,23 @@ def build_all_blame(project, combined_commits, repo_name, update=True):
         known_blame = set([x['cid'] for x in load_all_blame(project)])
         new_blame = bug_fix_commits.difference(known_blame)
         print 'new blame to be computed:', len(new_blame)
-
         if len(new_blame) > 0:
             new_blame = list(new_blame)
-            print
-            all_blame = compute_all_blame(new_blame, repo_name)
-            # prune huge entries
-            all_blame = [x for x in all_blame if filter_huge_blame(x)]
-            print 'saving'
-            jdump(load_all_blame(project) + all_blame,
-                  project_to_fname(project, blame=True))
-
+        else:
+            return
     else:
-        all_blame = compute_all_blame(list(bug_fix_commits), repo_name)
-        # prune huge entries
-        all_blame = [x for x in all_blame if filter_huge_blame(x)]
-        print 'saving'
-        jdump(all_blame, project_to_fname(project, blame=True))
+        new_blame = list(bug_fix_commits)
+
+    all_blame = compute_all_blame(new_blame, repo, repo_name)
+    # prune huge entries
+    for x in all_blame:
+        prune_huge_blame(x)
+
+    print 'saving'
+    if update:
+        all_blame = load_all_blame(project) + all_blame
+
+    jdump(all_blame, project_to_fname(project, blame=True))
 
 
 def load_all_blame(project):
@@ -820,6 +794,44 @@ def git_annotate_order(commits, repo_name):
     git_annotate_author_order(commits)
     git_annotate_file_order(commits)
     git_annotate_file_order_by_author(commits)
+
+
+def annotate_commit_loc(commits, repo_name,
+                        filt=['py', 'sh', 'js', 'c', 'go', 'sh']):
+    """Computes lines of code changed """
+
+    repo = git.Repo(repo_name)
+    total_operations = 0
+    for commit in commits.values():
+        if 'loc_add' not in commit:
+            # print commit['cid']
+            c = repo.commit(commit['cid'])
+            loc_add = 0
+            loc_change = 0
+            detail = {}
+
+            for p in c.parents:    # iterate through each parent
+                for d in c.diff(p, create_patch=True):
+                    if d.a_blob and d.a_blob.path.split('.')[-1] in filt:
+                        fname = d.a_blob.path
+                        adds = sum([1 for txt in d.diff.splitlines()
+                                    if txt.startswith('+')]) - 1
+                        removes = sum([1 for txt in d.diff.splitlines()
+                                       if txt.startswith('-')]) - 1
+                        changes = max(adds, removes)
+                        detail[fname] = {'add': adds, 'changes': changes}
+                        loc_add += adds
+                        loc_change += changes
+
+            commit['loc_add'] = loc_add
+            commit['loc_change'] = loc_change
+            commit['loc_detail'] = detail
+
+            total_operations += 1
+            if total_operations % 100 == 0:
+                    print '.',
+            if total_operations % 1000 == 0:
+                    print total_operations,
 
 #
 # ------ Other Helper Routes, not currently used --------
