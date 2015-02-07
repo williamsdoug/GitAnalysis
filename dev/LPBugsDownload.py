@@ -9,15 +9,11 @@
 # Last updated 1/25/2015
 #
 # History:
-# 0. 9/1/14: Converted from iPython notebook, added callable interfaces
-# 0. 9/10/14: Fixed debug comments
-# 0. 1/25/2015 - PEP-8 clean-up
-#
-# Issues:
-# -  None
-#
-# To Do:
-# -  None
+# - 9/1/2014: Converted from iPython notebook, added callable interfaces
+# - 9/10/2014: Fixed debug comments
+# - 1/25/2015: PEP-8 clean-up
+# - 2/5/2015: removed references to project='nova'
+# - 2/5/2015: created annotate_bug_status().  Only download fixed bugs
 #
 # Top Level Routines:
 #    from LPBugsDownload import build_lp_bugs, load_lp_bugs
@@ -180,8 +176,9 @@ def fetch_unique_bugno(project_name):
     """Generated list of bug id numbers from Launchpad """
     unique_bugs = {}
     project = lp.distributions[project_name]
-    bug_tasks = project.searchTasks(status=['Confirmed', 'In Progress',
-                                            'Fix Committed', 'Fix Released'])
+    bug_tasks = project.searchTasks(status=['Fix Committed', 'Fix Released'])
+    # bug_tasks = project.searchTasks(status=['Confirmed', 'In Progress',
+    #                                         'Fix Committed', 'Fix Released'])
     for b in bug_tasks:
         bugno = str(b).split('/')[-1]
         unique_bugs[bugno] = 1
@@ -244,6 +241,50 @@ def lp_parse_messages(messages):
     return result
 
 
+def annotate_bug_status(bugs, project):
+    global lp
+    lpproject = lp.distributions[project]
+    print 'annotating bug entries ...'
+    for bug in bugs.values():
+        bug['importance'] = False
+        bug['status'] = False
+
+    importance = ['Critical', 'High', 'Medium', 'Low', 'Wishlist',
+                  'Unknown', 'Undecided']
+
+    status = ['Fix Committed', 'Fix Released',
+              # 'New', 'Incomplete', 'Opinion', 'Invalid',
+              # "Won't Fix", 'Expired', 'Confirmed', 'Triaged',
+              # 'In Progress', 'Incomplete',
+              ]
+
+    for field in importance:
+        print '     ', field,
+        count = 0
+        count2 = 0
+        for bugno in [str(b).split('/')[-1]
+                      for b in lpproject.searchTasks(importance=field,
+                                                     status=status)]:
+            if bugno in bugs:
+                bugs[bugno]['importance'] = field
+                count += 1
+            count2 += 1
+        print count, '/', count2
+
+    print
+    for field in status:
+        print '     ', field,
+        count = 0
+        count2 = 0
+        for bugno in [str(b).split('/')[-1]
+                      for b in lpproject.searchTasks(status=field)]:
+            if bugno in bugs:
+                bugs[bugno]['status'] = field
+                count += 1
+            count2 += 1
+        print count, '/', count2
+
+
 #
 # Top Level Routines
 #
@@ -285,13 +326,15 @@ def build_lp_bugs(project, update=True, limit=-1, cachedir=''):
         ALL_BUGS[k] = v
     print 'Final bugs:', len(ALL_BUGS)
 
+    annotate_bug_status(ALL_BUGS, project)
+
     # save
     jdump(ALL_BUGS, pname)
 
 
-def load_lp_bugs(project='nova'):
+def load_lp_bugs(project):
     """
-    Top level routine to lad bug info from disk, includes port processing
+    Top level routine to load bug info from disk, includes port processing
     """
     pname = project_to_fname(project)
     x = jload(pname)

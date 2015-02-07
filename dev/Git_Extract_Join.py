@@ -519,12 +519,31 @@ def prune_huge_blame(entry, threshold=3000):
         entry['blame'] = {}
 
 
-def build_all_blame(project, combined_commits, repo_name, update=True):
-    """Top level routine to generate or update blame data"""
+def filter_bug_fix_commits(v):
+    importance = ['Critical', 'High',
+                  # 'Medium', 'Low', 'Wishlist',
+                  # 'Unknown', 'Undecided'
+                  ]
+
+    status = ['Fix Committed', 'Fix Released',
+              # 'New', 'Incomplete', 'Opinion', 'Invalid',
+              # "Won't Fix", 'Expired', 'Confirmed', 'Triaged',
+              # 'In Progress', 'Incomplete',
+              ]
+    return('lp:importance' in v and 'lp:status' in v
+           and v['lp:importance'] and v['lp:importance'] in importance
+           and v['lp:status'] and v['lp:status'] in status)
+
+
+def build_all_blame(project, combined_commits, repo_name, update=True,
+                    filt=filter_bug_fix_commits):
+    """Top level routine to generate or update blame data
+       filt - function used to idetify bugs
+    """
 
     repo = Repo(repo_name)
     bug_fix_commits = set([k for k, v in combined_commits.items()
-                           if 'lp:id' in v])
+                           if filt(v)])
     print 'bug fix commits:', len(bug_fix_commits)
 
     if update:

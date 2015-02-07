@@ -9,15 +9,11 @@
 # Last updated 1/25/2015
 #
 # History:
-# 0. 9/1/14: Converted from iPython notebook, added callable interfaces
-# 0. 9/10/14: Fix debug messages
-# 0. 1/25/15: PEP-8 clean-up
-#
-# Issues:
-# -  None
-#
-# To Do:
-# -  None
+# - 9/1/14: Converted from iPython notebook, added callable interfaces
+# - 9/10/14: Fix debug messages
+# - 1/25/15: PEP-8 clean-up
+# - 2/4/2015: fix hard coding of 'nova' in build_all_change_details()
+# - 2/5/2015: clean-up additional harc coding of project name
 #
 # Top Level Routines:
 #    from GerritDownload import build_gerrit_data
@@ -77,7 +73,7 @@ def get_projects(filter='openstack/'):
         return proj.keys()
 
 
-def get_all_changes(project="nova", prefix='openstack/', limit=1000000000):
+def get_all_changes(project, prefix='openstack/', limit=1000000000):
     """Gets list of changes for a project """
     global rest
     result = []
@@ -200,7 +196,7 @@ def prune(x):
     return x
 
 
-def load_gerrit_changes(project='nova'):
+def load_gerrit_changes(project):
     """Top level routine to load summary change data from disk"""
     name = project_to_fname(project)
     x = jload(name)
@@ -209,7 +205,7 @@ def load_gerrit_changes(project='nova'):
     return x
 
 
-def load_gerrit_change_details(project='nova'):
+def load_gerrit_change_details(project):
     """Top level routine to load detailed change data from disk"""
     name = project_to_fname(project, details=True)
     x = jload(name)
@@ -218,16 +214,16 @@ def load_gerrit_change_details(project='nova'):
     return x
 
 
-def build_all_changes(project='nova', update=False):
+def build_all_changes(project, update=False):
     """Top level routine to download summary change data """
-    all_changes = get_all_changes(project='nova')
+    all_changes = get_all_changes(project)
     print len(all_changes)
     name = project_to_fname(project)
     jdump(all_changes, name)
     return all_changes
 
 
-def build_all_change_details(project='nova', update=False):
+def build_all_change_details(project, update=False):
     """Top level routine to download detailed change data.
         Supports incremental updates.
     """
@@ -263,7 +259,7 @@ def build_all_change_details(project='nova', update=False):
         jdump(all_change_details, name)
         return all_change_details
     else:
-        all_changes = load_gerrit_changes('nova')
+        all_changes = load_gerrit_changes(project)
         all_change_details = []
         for changeno in [x['change_id'] for x in all_changes]:
             try:
@@ -276,7 +272,7 @@ def build_all_change_details(project='nova', update=False):
         return all_change_details
 
 
-def build_gerrit_data(project='nova', update=True):
+def build_gerrit_data(project, update=True):
     """Top level routine for downloading or updating both summary change data
         and detailed change data.
     """
