@@ -44,6 +44,8 @@
 # - 2/3/15 - Add update option to build_git_commits()
 # - 2/3/15 - Eliminate use of globals
 # - 2/3/15 - Enhanced build_all_blame to avoid re-computing large blame entries
+# - 2/6/15 - cleaned-up filter_bug_fix_commits() and
+#            filter_bug_fix_combined_commits()
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -52,6 +54,8 @@
 #    from Git_Extract_Join import build_all_blame, load_all_blame
 #
 #    from Git_Extract_Join import get_git_master_commit, get_authors_and_files
+#    from Git_Extract_Join import filter_bug_fix_commits
+#    from Git_Extract_Join import  filter_bug_fix_combined_commits
 #
 
 from git import *
@@ -519,7 +523,48 @@ def prune_huge_blame(entry, threshold=3000):
         entry['blame'] = {}
 
 
-def filter_bug_fix_commits(v):
+IMPORTANCE_VALUES = {
+    'crit': ['Critical'],
+    'high+': ['Critical', 'High'],
+    'med+': ['Critical', 'High', 'Medium'],
+    'low+': ['Critical', 'High', 'Medium', 'Low'],
+    'all': ['Critical', 'High', 'Medium', 'Low', 'Wishlist',
+            'Unknown', 'Undecided'],
+}
+
+STATUS_VALUES = {
+    'committed': ['Fix Committed', ],
+    'fixed': ['Fix Committed', 'Fix Released', ],
+    'active': ['New', 'Confirmed', 'Triaged', 'In Progress', ],
+    'all': ['Fix Committed', 'Fix Released', 'New', 'Incomplete', 'Opinion',
+            'Invalid', "Won't Fix", 'Expired', 'Confirmed', 'Triaged',
+            'In Progress', 'Incomplete', ]
+}
+
+
+def filter_bug_fix_combined_commits(v, importance='low+', status='fixed'):
+    """Filter function for combined_commits based on type of bug"""
+    importance = IMPORTANCE_VALUES[importance]
+    status = STATUS_VALUES[status]
+
+    return('lp:importance' in v and 'lp:status' in v
+           and v['lp:importance'] and v['lp:importance'] in importance
+           and v['lp:status'] and v['lp:status'] in status
+           )
+
+
+def filter_bug_fix_commits(v, importance='low+', status='fixed'):
+    """Filter function for commits based on type of bug"""
+    importance = IMPORTANCE_VALUES[importance]
+    status = STATUS_VALUES[status]
+
+    return('importance' in v and 'status' in v
+           and v['importance'] and v['importance'] in importance
+           and v['status'] and v['status'] in status
+           )
+
+#deleteme
+def xfilter_bug_fix_commits(v):
     importance = ['Critical', 'High',
                   # 'Medium', 'Low', 'Wishlist',
                   # 'Unknown', 'Undecided'
@@ -536,7 +581,7 @@ def filter_bug_fix_commits(v):
 
 
 def build_all_blame(project, combined_commits, repo_name, update=True,
-                    filt=filter_bug_fix_commits):
+                    filt=filter_bug_fix_combined_commits):
     """Top level routine to generate or update blame data
        filt - function used to idetify bugs
     """

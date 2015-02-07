@@ -17,8 +17,12 @@
 # - 1/27/15: Initial version of commit_analysis.py based on contents
 #            of NovaAnalysis notebook
 # - 2/4/15 - Added compute_guilt(), previously in BlameAnalysis Spreadsheet
-# - 2/6/15 - Added top level routines load_all_analysis_data() and
-#            rebuild_all_analysis_data
+# - 2/6/15 - Added top level routines load_all_analysis_data(),
+#            load_core_analysis_data() and rebuild_all_analysis_data()
+# - 2/6/15 - Modified compute_guilt() to use filter_bug_fix_combined_commits()
+#            when selecting blame entries for guilt calculation.
+# - 2/7/15 - moved functions from notebook: trim_entries(), parse_author(),
+#            create_feature(), extract_features()
 #
 # Top Level Routines:
 #    from commit_analysis import blame_compute_normalized_guilt
@@ -27,7 +31,9 @@
 #    from commit_analysis import get_commit_count_by_author
 #    from commit_analysis import get_blame_by_commit
 #    from commit_analysis import compute_guilt
+#    from commit_analysis import extract_features
 #
+#    from commit_analysis import load_core_analysis_data
 #    from commit_analysis import load_all_analysis_data
 #    from commit_analysis import rebuild_all_analysis_data
 #
@@ -36,6 +42,12 @@
 # import numpy as np
 from collections import defaultdict
 import re
+import math
+import numpy as np
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.feature_extraction import DictVectorizer
 
 from LPBugsDownload import build_lp_bugs, load_lp_bugs
 
@@ -46,6 +58,9 @@ from Git_Extract_Join import build_git_commits, load_git_commits
 from Git_Extract_Join import build_joined_LP_Gerrit_git, load_combined_commits
 from Git_Extract_Join import build_all_blame, load_all_blame
 
+
+from Git_Extract_Join import filter_bug_fix_combined_commits
+
 # import sys
 # from jp_load_dump import jload
 
@@ -53,6 +68,18 @@ from Git_Extract_Join import build_all_blame, load_all_blame
 #
 # Top level routines to load and update analysis data
 #
+
+
+def load_core_analysis_data(project):
+    """ Loads combined_commits and all_blame."""
+
+    combined_commits = load_combined_commits(project)
+    print 'combined_commits:', len(combined_commits)
+
+    all_blame = load_all_blame(project)
+    print 'all blame:', len(all_blame)
+
+    return combined_commits, all_blame
 
 
 def load_all_analysis_data(project):
@@ -116,6 +143,98 @@ def rebuild_all_analysis_data(project, repo_name, update=True):
 # Routines for post-processing Dataset
 #
 
+
+def trim_entries(combined_commits, all_blame):
+    """Returns order range (min, max) based on first and list
+    bug fix commit. First entry is after first bug fix.
+    """
+    buglist = [(combined_commits[be['cid']]['order'], be['cid'])
+               for be in all_blame]
+    buglist = sorted(buglist, key=lambda x: x[0])
+    return buglist[0][0] + 1, buglist[-1][0]
+
+
+RE_AUTH = re.compile('<(\S+@\S+)>')
+RE_AUTH2 = re.compile('"(\S+@\S+)\s')
+RE_AUTH3 = re.compile('"(\S+)\s')
+
+
+def parse_author_and_org(auth):
+    result = RE_AUTH.search(auth)
+    if not result:  # Try alternative pattern
+        result = RE_AUTH2.search(auth)
+    if not result:  # Try alternative pattern
+        result = RE_AUTH3.search(auth)
+    if not result:
+        if 'docs.openstack.org' in str(auth):
+            return 'openstack-tool@openstack.org', 'openstack.org'
+        else:
+            raise Exception('Unable to parse author: ' + str(auth))
+
+    author_name = result.groups()[0]
+    author_org = author_name.split('@')[-1]
+    return author_name, author_org
+
+
+def create_feature(c):
+    """Extract features from combined_commits entry"""
+    label = c['guilt']
+    cid = c['cid']
+
+    feats = {}
+    # feats['order'] = math.log(c['order'])
+
+    # General information about author
+    author_name, author_org = parse_author_and_org(c['author'])
+    feats['author'] = author_name
+    feats['author_org'] = author_org
+    feats['author_order'] = math.log(c['author_order'])
+
+    # if this commit associated with a bug fix itself
+    feats['is_bug_fix'] = 'lp:id' in c
+
+    # General information around change (size (loc), code maturity,
+    # prior bugs in module)
+    for fname in c['files']:
+        feats[fname] = 1
+    if c['file_order']:
+        feats['min_file_order'] = math.log(min([v for v
+                                                in c['file_order'].values()]))
+        feats['max_file_order'] = math.log(max([v for v
+                                                in c['file_order'].values()]))
+
+    # Information about committer, approver and reviewers
+    committer_name, _ = parse_author_and_org(c['committer'])
+    feats['committer'] = committer_name
+
+    # Information about code changes
+    feats['loc_add'] = c['loc_add']
+    feats['loc_change'] = c['loc_change']
+    for fname, detail in c['loc_detail']. items():
+        feats['loc_add_' + fname] = detail['add']
+        feats['loc_changes_' + fname] = detail['changes']
+
+    """
+    # Features below commented out since no impact on recall and F1
+    if False: #'g:labels' in c:
+        feats['approved'] = c['g:labels']['Code-Review']['approved']['name']
+        for r in c['g:labels']['Code-Review']['all']:
+            feats['reviewer'+ r['name']] = r['value']
+
+        feats['votes'] = sum([r['value'] for r
+                              in c['g:labels']['Code-Review']['all']])
+
+    if False: # 'g:messages' in c and c['g:messages']:
+        feats['revision'] = max([msg['_revision_number']
+                                 for msg in c['g:messages']])
+    """
+
+    if 'lp:message_count' in c:
+        feats['lp_messages'] = c['lp:message_count']
+
+    return cid, label, feats
+
+
 # should we clip based on max distance???
 def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
     """Apportions guilt for each blame entry to individual commits
@@ -143,6 +262,80 @@ def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
         return dict([[k, v/total] for k, v in result.items()])
     else:
         return {}
+
+
+def extract_features(combined_commits, all_blame, threshold=False,
+                     clip=False, min_order=False, max_order=False,
+                     offset=0, limit=0, equalize=False,
+                     debug=True):
+    """Extracts features from combined_commits
+    Parameters:
+    - threshold -- Used for classification, determines 1 /0 labels. False
+      for regression (default)
+    - clip -- Limits max value of label for regression problems.
+    - min_order, max_order -- range of included commits.  full range
+      by default
+    - offset -- relative start, either as integer or percent
+    - limit -- overall entries, either integer or percent
+
+    Returns:
+    - Labels
+    - Feature Matrix
+    - Feature matrix column names
+    """
+
+    if not min_order and not max_order:
+        min_order, max_order = trim_entries(combined_commits, all_blame)
+    elif not min_order:
+        min_order, _ = trim_entries(combined_commits, all_blame)
+    elif not max_order:
+        _, max_order = trim_entries(combined_commits, all_blame)
+
+    order_range = max_order - min_order
+
+    if offset == 0:
+        pass
+    elif type(offset) is int:
+        min_order += offset
+    elif type(offset) is float and offset < 1.0:
+        min_order += int(order_range*offset)
+    else:
+        raise Exception('extract_features: Invalid offset value '
+                        + str(offset))
+
+    if limit == 0:
+        pass
+    elif type(limit) is int:
+        max_order = min_order + limit - 1
+    elif type(limit) is float and offset < 1.0:
+        max_order = min_order + int(order_range*limit)
+    else:
+        raise Exception('extract_features: Invalid limit value ' + str(limit))
+
+    cid, Y, features = zip(*[create_feature(x)
+                             for x in combined_commits.values()
+                             if (x['order'] >= min_order
+                                 and x['order'] <= max_order)])
+
+    vec = DictVectorizer()
+    X = vec.fit_transform([f for f in features]).toarray()
+
+    Y = np.asarray(Y)
+    if clip:
+        Y = np.minimum(Y, float(clip))
+
+    scaler = MinMaxScaler()     # Use MinMaxScaler non-gaussian data
+    X = scaler.fit_transform(X)
+
+    if debug:
+        print 'total features:', len(features)
+    if threshold:   # Quantize guilt
+        Y = np.asarray(Y) > threshold
+        if debug:
+            print 'bugs based on threshold:', sum(Y)
+            print 'actual bugs:', sum([1 for f in features if f['is_bug_fix']])
+
+    return cid, Y, X, vec.get_feature_names()
 
 
 re_author = re.compile('"([^"]*)"')
@@ -215,14 +408,17 @@ def get_blame_by_commit(combined_commits, all_blame):
     return blame_by_commit
 
 
-def compute_guilt(combined_commits, all_blame):
+def compute_guilt(combined_commits, all_blame, importance='high+'):
     for c in combined_commits.values():  # initialize guilt values
         c['guilt'] = 0.0
 
     for be in all_blame:    # now apply weighted guilt for each blame
-        for c, g in blame_compute_normalized_guilt(be,
+        v = combined_commits[be['cid']]
+        if filter_bug_fix_combined_commits(v, importance=importance):
+            for c, g in \
+                    blame_compute_normalized_guilt(be,
                                                    exp_weighting=True).items():
-            combined_commits[c]['guilt'] += g
+                combined_commits[c]['guilt'] += g
 
     total = len(combined_commits)
     guilty = sum([1 for v in combined_commits.values() if v['guilt'] > 0])
