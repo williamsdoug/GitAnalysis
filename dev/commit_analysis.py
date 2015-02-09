@@ -23,6 +23,8 @@
 #            when selecting blame entries for guilt calculation.
 # - 2/7/15 - moved functions from notebook: trim_entries(), parse_author(),
 #            create_feature(), extract_features()
+# - 2/9/15 - added autoset_threshold() and helper function
+#            count_guilty_commits()
 #
 # Top Level Routines:
 #    from commit_analysis import blame_compute_normalized_guilt
@@ -32,6 +34,7 @@
 #    from commit_analysis import get_blame_by_commit
 #    from commit_analysis import compute_guilt
 #    from commit_analysis import extract_features
+#    from commit_analysis import autoset_threshold
 #
 #    from commit_analysis import load_core_analysis_data
 #    from commit_analysis import load_all_analysis_data
@@ -333,7 +336,6 @@ def extract_features(combined_commits, all_blame, threshold=False,
         Y = np.asarray(Y) > threshold
         if debug:
             print 'bugs based on threshold:', sum(Y)
-            print 'actual bugs:', sum([1 for f in features if f['is_bug_fix']])
 
     return cid, Y, X, vec.get_feature_names()
 
@@ -427,7 +429,61 @@ def compute_guilt(combined_commits, all_blame, importance='high+'):
     max_guilt = max([v['guilt']
                      for v in combined_commits.values() if v['guilt'] > 0])
 
-    print 'guilty: ', guilty, 'out of',  total,
+    print 'entries with non-zero guilt: ', guilty, 'out of',  total,
     print '(',  100.0 * float(guilty) / float(total), '%', ')'
     print 'smallest guilt:', min_guilt
     print 'largest guilt:', max_guilt
+
+
+#
+# Routines for selecting guilt threshold value
+#
+
+def count_guilty_commits(combined_commits, threshold):
+    """Helper function for autoset_threshold()"""
+    return sum([1 for v in combined_commits.values()
+                if v['guilt'] >= threshold])
+
+
+def autoset_threshold(combined_commits, actual):
+    """Computes threshold value for guilt, later used to create
+       Y labels during feature extraction, such that number of
+       positive labels matches number of actual bugs
+    """
+    lower_thresh = min([v['guilt']
+                        for v in combined_commits.values() if v['guilt'] > 0])
+    upper_thresh = max([v['guilt']
+                        for v in combined_commits.values() if v['guilt'] > 0])
+
+    lower_count = count_guilty_commits(combined_commits, lower_thresh)
+    upper_count = count_guilty_commits(combined_commits, upper_thresh)
+
+    # verify that target bug count is within range
+    if upper_count >= actual:
+        return upper_thresh
+    elif lower_count <= actual:
+        return lower_threshold
+
+    # use binary search to hoem in on threshold
+
+    limit = 20
+    last_mid_count = -1
+    while limit > 0:
+        limit -= 1
+
+        mid_thresh = (upper_thresh + lower_thresh) / 2.0
+        mid_count = count_guilty_commits(combined_commits, mid_thresh)
+
+        if mid_count == actual or last_mid_count == mid_count:
+            break
+
+        last_mid_count = mid_count
+
+        if mid_count < actual:
+            upper_thresh = mid_thresh
+            upper_count = mid_count
+        else:
+            lower_thresh = mid_thresh
+            lower_count = mid_count
+
+    return mid_thresh, mid_count
