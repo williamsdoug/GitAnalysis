@@ -5,7 +5,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 1/27/2014
+# Last updated 2/9/2014
 #
 # History:
 # - 9/2/14:  Initial version (initially contained in NovaSampleData).
@@ -24,7 +24,7 @@
 # - 2/7/15 - moved functions from notebook: trim_entries(), parse_author(),
 #            create_feature(), extract_features()
 # - 2/9/15 - added autoset_threshold() and helper function
-#            count_guilty_commits()
+#            count_guilty_commits().  Added fit_features()
 #
 # Top Level Routines:
 #    from commit_analysis import blame_compute_normalized_guilt
@@ -33,6 +33,7 @@
 #    from commit_analysis import get_commit_count_by_author
 #    from commit_analysis import get_blame_by_commit
 #    from commit_analysis import compute_guilt
+#    from commit_analysis import fit_features
 #    from commit_analysis import extract_features
 #    from commit_analysis import autoset_threshold
 #
@@ -217,20 +218,18 @@ def create_feature(c):
         feats['loc_add_' + fname] = detail['add']
         feats['loc_changes_' + fname] = detail['changes']
 
-    """
-    # Features below commented out since no impact on recall and F1
-    if False: #'g:labels' in c:
+    if 'g:labels' in c:
         feats['approved'] = c['g:labels']['Code-Review']['approved']['name']
         for r in c['g:labels']['Code-Review']['all']:
-            feats['reviewer'+ r['name']] = r['value']
+            feats['reviewer' + r['name']] = r['value']
 
         feats['votes'] = sum([r['value'] for r
                               in c['g:labels']['Code-Review']['all']])
 
-    if False: # 'g:messages' in c and c['g:messages']:
+    if 'g:messages' in c and c['g:messages']:
         feats['revision'] = max([msg['_revision_number']
-                                 for msg in c['g:messages']])
-    """
+                                 for msg in c['g:messages']
+                                 if '_revision_number' in msg])
 
     if 'lp:message_count' in c:
         feats['lp_messages'] = c['lp:message_count']
@@ -267,25 +266,9 @@ def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
         return {}
 
 
-def extract_features(combined_commits, all_blame, threshold=False,
-                     clip=False, min_order=False, max_order=False,
-                     offset=0, limit=0, equalize=False,
-                     debug=True):
-    """Extracts features from combined_commits
-    Parameters:
-    - threshold -- Used for classification, determines 1 /0 labels. False
-      for regression (default)
-    - clip -- Limits max value of label for regression problems.
-    - min_order, max_order -- range of included commits.  full range
-      by default
-    - offset -- relative start, either as integer or percent
-    - limit -- overall entries, either integer or percent
-
-    Returns:
-    - Labels
-    - Feature Matrix
-    - Feature matrix column names
-    """
+def extract_features_helper(combined_commits, all_blame,
+                            min_order, max_order,
+                            offset, limit):
 
     if not min_order and not max_order:
         min_order, max_order = trim_entries(combined_commits, all_blame)
@@ -320,15 +303,77 @@ def extract_features(combined_commits, all_blame, threshold=False,
                              if (x['order'] >= min_order
                                  and x['order'] <= max_order)])
 
+    return cid, Y, features
+
+
+def fit_features(combined_commits, all_blame,
+                 min_order=False, max_order=False,
+                 offset=0, limit=0):
+    """Fits features in preparation for extract_features()
+    Parameters:
+    - min_order, max_order -- range of included commits.  full range
+      by default
+    - offset -- relative start, either as integer or percent
+    - limit -- overall entries, either integer or percentd
+
+    Returns (except for fit=True):
+    - Labels
+    - Feature Matrix
+    - Feature matrix column names
+    """
+
     vec = DictVectorizer()
+    scaler = MinMaxScaler()
+    extract_state = {'vec': vec, 'scaler': scaler}
+
+    cid, Y, features = extract_features_helper(combined_commits,
+                                               all_blame,
+                                               min_order, max_order,
+                                               offset, limit)
+
     X = vec.fit_transform([f for f in features]).toarray()
+    X = scaler.fit_transform(X)
+    return extract_state
+
+
+def extract_features(combined_commits, all_blame, extract_state,
+                     threshold=False,
+                     clip=False, min_order=False, max_order=False,
+                     offset=0, limit=0, equalize=False,
+                     debug=True):
+    """Extracts features from combined_commits
+    Parameters:
+    - threshold -- Used for classification, determines 1 /0 labels. False
+      for regression (default)
+    - clip -- Limits max value of label for regression problems.
+    - min_order, max_order -- range of included commits.  full range
+      by default
+    - offset -- relative start, either as integer or percent
+    - limit -- overall entries, either integer or percent
+
+    Returns:
+    - Labels
+    - Feature Matrix
+    - Feature matrix column names
+    """
+
+    vec = extract_state['vec']
+    scaler = extract_state['scaler']
+
+    cid, Y, features = extract_features_helper(combined_commits,
+                                               all_blame,
+                                               min_order, max_order,
+                                               offset, limit)
+
+    X = vec.transform([f for f in features]).toarray()
 
     Y = np.asarray(Y)
     if clip:
         Y = np.minimum(Y, float(clip))
 
-    scaler = MinMaxScaler()     # Use MinMaxScaler non-gaussian data
-    X = scaler.fit_transform(X)
+    # scaler = MinMaxScaler()     # Use MinMaxScaler non-gaussian data
+    # X = scaler.fit_transform(X)
+    X = scaler.transform(X)
 
     if debug:
         print 'total features:', len(features)
