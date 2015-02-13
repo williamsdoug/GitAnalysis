@@ -2,11 +2,11 @@
 #
 # Author:  Doug Williams - Copyright 2014, 2015
 #
-# Last updated 1/25/2014
+# Last updated 2/13/2014
 #
 # History:
 # - 1/25/15: Added history tracking, PEP-8 clean-up
-#
+# - 2/13/15: Fixed handling of dict entries with False value
 
 import cPickle as pickle
 import gzip
@@ -49,6 +49,8 @@ def jdump_helper(x, f, item_per_line=True):
         # print type(x), 'is dict'
         for k, v in x.items():
             try:
+                if not v:
+                    v = {'json_tombstone': 1}
                 v['json_key'] = k
                 f.write(json.dumps(v, default=convert_to_builtin_type))
                 f.write("\n")
@@ -74,7 +76,10 @@ def jload_helper(f):
                 # individual entries are items in a dict:
                 k = v['json_key']
                 del v['json_key']
-                dict_result[k] = v
+                if len(v) == 1 and 'json_tombstone' in v:
+                    dict_result[k] = False
+                else:
+                    dict_result[k] = v
                 pass
             else:
                 result.append(v)

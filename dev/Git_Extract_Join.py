@@ -53,6 +53,13 @@
 #             file prefixes
 # - 2/13/15 - Disable patch data annotation by default in build_git_commits()
 #             Enhancements to merge code appear to make this obsolete.
+# - 2/13/15 - Added error handling for missing file to build_all_blame()
+#             and build_git_commits()
+# - 2/13/15 - Modify process_commit_files(), process_commit_details()
+#             and annotate_commit_loc() to only follow primary parent [0]
+# -2/13/15  - Allow commits file to remember pruned entries (represented
+#             as False). Add option load_git_commits() to filter prunced
+#             entries to avoid impact to downstream code.
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -171,9 +178,6 @@ def parse_msg(msg, patch=False):
         if patch:
             if line.startswith('From: '):
                 try:
-                    # '<git.Actor "'
-                    # + obj.name.encode('ascii', 'ignore')
-                    # +' <'+ obj.email+'>">'
                     result.update({'pAuth': '<git.Actor "'
                                             + line[len('From: '):]+'">'})
                 except Exception:
@@ -233,7 +237,9 @@ def process_commit_files(c, excludes=[], filt=FILTER_FILE_SUFFIX):
 
     files = []
 
-    for p in c.parents:    # iterate through each parent
+    # for p in c.parents:    # iterate through each parent
+    if len(c.parents) > 0:
+        p = c.parents[0]
         i = c.diff(p, create_patch=False)
 
         for d in i.iter_change_type('A'):
@@ -416,7 +422,8 @@ def annotate_master_branch(commits, master_commit):
     """
     # Annotate master branch
     for v in commits.values():
-        v['on_master_branch'] = False
+        if v:
+            v['on_master_branch'] = False
 
     current = master_commit
     runaway = 10000
@@ -448,12 +455,13 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
     # populate pruning last from merge commits
     prune = []
     for c in commits.values():
-        if is_merge_commit(c):
-            c['merge_commit'] = True
-            prune.append(c['parents'][1])
-            combine_merge_commit(c, commits)
-        else:
-            c['merge_commit'] = False
+        if c:
+            if is_merge_commit(c):
+                c['merge_commit'] = True
+                prune.append(c['parents'][1])
+                combine_merge_commit(c, commits)
+            else:
+                c['merge_commit'] = False
 
     if verbose:
         print 'initial commmits to be pruned:', len(prune)
@@ -465,23 +473,27 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
         runaway -= 1
         cid = prune[0]
         del prune[0]
-        if cid not in commits:
+        if cid not in commits or not commits[cid]:
             continue
         c = commits[cid]
 
         for p in c['parents']:
-            if p in commits and not commits[p]['on_master_branch']:
+            if (p in commits and commits[p]
+               and not commits[p]['on_master_branch']):
                 prune.append(p)
-        del commits[cid]
+        commits[cid] = False  # empty commit implies pruning
 
     # order commits based on timestamp
-    commit_order = [[c['cid'], c['date']] for c in commits.values()]
+    commit_order = [[c['cid'], c['date']] for c in commits.values() if c]
     commit_order = sorted(commit_order, key=lambda z: z[1])
     for i, (cid, _) in enumerate(commit_order):
         commits[cid]['order'] = i + 1
 
     if verbose:
-        print 'commits after pruning:', len(commits)
+        print 'commits after pruning:',
+        print sum([1 for c in commits.values() if c])
+
+    return commits
 
 
 #
@@ -498,8 +510,13 @@ def build_git_commits(project, repo_name, update=True, include_patch=False):
     exclude_file_prefix = GET_FILE_EXCLUDE_PREFIXES(project)
 
     if update:
-        commits = load_git_commits(project)
-    else:
+        try:
+            # Commits will include pruned entries
+            commits = load_git_commits(project, prune=False)
+        except Exception:
+            update = False
+
+    if not update:
         commits = collections.defaultdict(list)
 
     commits = process_commits(repo, commits, excludes=exclude_file_prefix)
@@ -511,28 +528,42 @@ def build_git_commits(project, repo_name, update=True, include_patch=False):
         print
 
     print 'Consolidate Git Merge related commits'
-    consolidate_merge_commits(commits, get_git_master_commit(repo_name))
+    commits = consolidate_merge_commits(commits,
+                                        get_git_master_commit(repo_name))
 
     print 'Augment Git data with ordering info'
     git_annotate_order(commits, repo_name)
+
     print
     print 'Augment Git data with lines-of-code changed'
     annotate_commit_loc(commits, repo_name, excludes=exclude_file_prefix)
+
     jdump(commits, project_to_fname(project))
 
 
-def load_git_commits(project):
+def load_git_commits(project, prune=True):
     """Top level routine to load commit data, returns dict indexed by cid"""
 
     name = project_to_fname(project)
     result = jload(name)
 
+    if prune:
+        for k, v in result.items():
+            if not v:
+                del result[k]
+
     print 'total git_commits:', len(result)
-    print 'bug fix commits:', len([x for x in result.values() if 'bug' in x])
-    print 'commits with change_id:', len([x for x in result.values()
-                                          if 'change_id' in x])
-    print 'bug fix with change_id:', len([x for x in result.values()
-                                          if 'change_id' in x and 'bug' in x])
+    if not prune:
+        pruned = sum([1 for v in result.values() if not v])
+        print '  actual commits:', len(result) - pruned
+        print '  pruned commits:', pruned
+    print 'bug fix commits:', sum([1 for x in result.values()
+                                   if x and 'bug' in x])
+    print 'commits with change_id:', sum([1 for x in result.values()
+                                          if x and 'change_id' in x])
+    print 'bug fix with change_id:', sum([1 for x in result.values()
+                                          if x and 'change_id' in x
+                                          and 'bug' in x])
     return result
 
 
@@ -653,19 +684,26 @@ def process_commit_details(cid, repo, repo_name,
 
     # blame = [assign_blame(d.b_blob.path, d.diff, p.hexsha,
     #                       repo_name, cid)
-    output = [pool.apply_async(assign_blame,
-                               args=(d.b_blob.path, d.diff, p.hexsha,
-                                     repo_name, cid))
-              for p in c.parents    # iterate through each parent
-              for d in c.diff(p, create_patch=True).iter_change_type('M')
-              if (d.a_blob and d.b_blob
-                  and filter_file(d.b_blob.path.split('.')[-1],
-                                  excludes, filt)
-                  and str(d.a_blob) != git.objects.blob.Blob.NULL_HEX_SHA
-                  and str(d.b_blob) != git.objects.blob.Blob.NULL_HEX_SHA
-                  and d.a_blob.size != 0
-                  and d.b_blob.size != 0)
-              ]
+    output = []
+    if len(c.parents) > 0:
+        p = c.parents[0]
+        output = [pool.apply_async(assign_blame,
+                                   args=(d.b_blob.path,
+                                         d.diff, p.hexsha,
+                                         repo_name, cid))
+                  # for p in c.parents    # iterate through each parent
+                  for d in c.diff(p, create_patch=True).iter_change_type('M')
+                  if (d.a_blob and d.b_blob
+                      and filter_file(d.b_blob.path.split('.')[-1],
+                                      excludes, filt)
+                      and str(d.a_blob) != git.objects.blob.Blob.NULL_HEX_SHA
+                      and str(d.b_blob) != git.objects.blob.Blob.NULL_HEX_SHA
+                      and d.a_blob.size != 0
+                      and d.b_blob.size != 0)
+                  ]
+    else:
+        output = []
+
     blame = [p.get() for p in output]
     pool.close()
     pool.join()
@@ -748,7 +786,12 @@ def filter_bug_fix_commits(v, importance='low+', status='fixed'):
 def build_all_blame(project, combined_commits, repo_name, update=True,
                     filt=filter_bug_fix_combined_commits):
     """Top level routine to generate or update blame data
-       filt - function used to idetify bugs
+    Parameters:
+       project - name of project (used as prefix for all files)
+       combined_commits - git-relared data
+       repo_name - location of git repo
+       update - determines whether full or incremental rebuild
+       filt - function used to idnetify bugs
     """
 
     repo = Repo(repo_name)
@@ -758,14 +801,18 @@ def build_all_blame(project, combined_commits, repo_name, update=True,
     print 'bug fix commits:', len(bug_fix_commits)
 
     if update:
-        known_blame = set([x['cid'] for x in load_all_blame(project)])
-        new_blame = bug_fix_commits.difference(known_blame)
-        print 'new blame to be computed:', len(new_blame)
-        if len(new_blame) > 0:
-            new_blame = list(new_blame)
-        else:
-            return
-    else:
+        try:
+            known_blame = set([x['cid'] for x in load_all_blame(project)])
+            new_blame = bug_fix_commits.difference(known_blame)
+            print 'new blame to be computed:', len(new_blame)
+            if len(new_blame) > 0:
+                new_blame = list(new_blame)
+            else:
+                return
+        except Exception:
+            update = False
+
+    if not update:
         new_blame = list(bug_fix_commits)
 
     all_blame = compute_all_blame(new_blame, repo, repo_name,
@@ -794,7 +841,7 @@ def load_all_blame(project):
 def identify_jenkins_commit(commits):
     """Finds commits where Jenkins is author """
     return [c['cid'] for c in commits.values()
-            if 'jenkins@review.openstack.org' in c['author']]
+            if c and 'jenkins@review.openstack.org' in c['author']]
 
 
 def get_patch_data(cid, project):
@@ -962,7 +1009,8 @@ def git_annotate_author_order(commits):
     author_commits = collections.defaultdict(list)
 
     for k, c in commits.items():
-        author_commits[c['author']].append((c['order'], k))
+        if c:
+            author_commits[c['author']].append((c['order'], k))
 
     for author, val in author_commits.items():
         for i, (order, c) in enumerate(sorted(val, key=lambda x: x[0])):
@@ -974,9 +1022,10 @@ def git_annotate_file_order(commits):
     file_commits = collections.defaultdict(list)
 
     for k, c in commits.items():
-        for fname in c['files']:
-            file_commits[fname].append((c['order'], k))
-        c['file_order'] = {}    # Use this as opportunity to tack on new field
+        if c:
+            for fname in c['files']:
+                file_commits[fname].append((c['order'], k))
+            c['file_order'] = {}    # Use this as oppty to track on new field
 
     for fname, val in file_commits.items():
         for i, (order, c) in enumerate(sorted(val, key=lambda x: x[0])):
@@ -989,10 +1038,12 @@ def git_annotate_file_order_by_author(commits):
         lambda: collections.defaultdict(list))
 
     for k, c in commits.items():
-        for fname in c['files']:
-            file_commits_by_author[fname][c['author']].append((c['order'], k))
-            # Use this as opportunity to tack on new field
-        c['file_order_for_author'] = {}
+        if c:
+            for fname in c['files']:
+                file_commits_by_author[fname][c['author']].append((c['order'],
+                                                                   k))
+                # Use this as opportunity to tack on new field
+            c['file_order_for_author'] = {}
 
     for fname, entry in file_commits_by_author.items():
         for author, val in entry.items():
@@ -1019,14 +1070,16 @@ def annotate_commit_loc(commits, repo_name,
     repo = git.Repo(repo_name)
     total_operations = 0
     for commit in commits.values():
-        if 'loc_add' not in commit:
+        if commit and 'loc_add' not in commit:
             # print commit['cid']
             c = repo.commit(commit['cid'])
             loc_add = 0
             loc_change = 0
             detail = {}
+            if len(c.parents) > 0:
+                p = c.parents[0]
 
-            for p in c.parents:    # iterate through each parent
+                # for p in c.parents:    # iterate through each parent
                 for d in c.diff(p, create_patch=True):
                     if d.a_blob and filter_file(d.a_blob.path.split('.')[-1],
                                                 excludes, filt):
@@ -1066,7 +1119,8 @@ def get_authors_and_files(commits):
     authors = {}
     files = {}
     for c in commits.values():
-        authors[c['author']] = 1
-        for fn in c['files']:
-            files[fn] = 1
+        if c:
+            authors[c['author']] = 1
+            for fn in c['files']:
+                files[fn] = 1
     return authors.keys(), files.keys()

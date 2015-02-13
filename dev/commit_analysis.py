@@ -118,6 +118,8 @@ def rebuild_all_analysis_data(project, repo_name, update=True):
     """Rebuilds core datasets"""
     cachedir = './cache/' + project + '/'
 
+    print
+    print 'rebuilding Launchpad (bug) data'
     build_lp_bugs(project, update=update, cachedir=cachedir)
 
     print
@@ -128,6 +130,7 @@ def rebuild_all_analysis_data(project, repo_name, update=True):
     print'building Git data'
     build_git_commits(project, repo_name, update=update)
 
+    print
     print 'Preparation for join'
     downloaded_bugs = load_lp_bugs(project)
     commits = load_git_commits(project)
