@@ -46,6 +46,7 @@
 # - 2/3/15 - Enhanced build_all_blame to avoid re-computing large blame entries
 # - 2/6/15 - cleaned-up filter_bug_fix_commits() and
 #            filter_bug_fix_combined_commits()
+# - 2/12/15 - Multiple new routines to handle git merge consolidation
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -316,8 +317,148 @@ def parse_diff(diff_text, proximity_limit=4):
 
     return sorted([x for x in result if x['lineno'] in window])
 
+#
+# Routines to handle merge commits
+#
 
-def build_git_commits(project, repo_name, update=True):
+
+def is_special_git_actor(field, names):
+    """Helper function for is_special_author and is_special_committer"""
+    for name in names:
+        if name in field:
+            return True
+    return False
+
+
+def is_special_author(commit, special_names=['jenkins@review.openstack.org',
+                                             'jenkins@openstack.org']):
+    """Identifies commits related to tools chain"""
+    return is_special_git_actor(commit['author'], special_names)
+
+
+def is_special_committer(commit,
+                         special_names=['review@openstack.org',
+                                        'hudson@openstack.org',
+                                        'Tarmac']):
+    """Identifies commits related to tools chain"""
+    return is_special_git_actor(commit['committer'], special_names)
+
+
+def is_merge_commit(commit, include_special_actor=False):
+    """Identifies non-fastforward Git Merge commits"""
+    if not (commit['on_master_branch']
+            and len(commit['parents']) >= 2):
+        return False
+    if include_special_actor:
+        return is_special_committer(commit)
+    else:
+        return True
+
+
+def combine_merge_commit(c, commits):
+    """ Promotes relevant information from second parent into
+    merge commit
+    """
+    parent = commits[c['parents'][1]]
+
+    if is_special_committer(c) and is_special_committer(parent):
+        c['committer'] = c['author']
+        c['author'] = parent['author']
+    elif is_special_committer(c):
+        c['author'] = parent['author']
+        c['committer'] = parent['committer']
+    else:
+        c['author'] = parent['author']
+
+    if 'change_id' in parent:
+        c['change_id'] = parent['change_id']
+    if 'bug' not in c and 'bug' in parent:
+        c['bug'] = parent['bug']
+
+    c['msg'] = c['msg'] + '\n' + parent['msg']
+    c['parents'] = c['parents'][0:1]
+
+
+def annotate_master_branch(commits, master_commit):
+    """Master branch is considered as lineage from Master
+    commit by following first parent
+    """
+    # Annotate master branch
+    for v in commits.values():
+        v['on_master_branch'] = False
+
+    current = master_commit
+    runaway = 10000
+
+    while current and runaway > 0:
+        runaway -= 1
+        c = commits[current]
+        c['on_master_branch'] = True
+        if c['parents']:
+            current = c['parents'][0]
+        else:
+            current = False
+
+
+def consolidate_merge_commits(commits, master_commit, verbose=True):
+    """Clean-up for Git Merge commits (non-fast fordward)
+    - Consolidates  all change-related information into merge commit
+      - Author, Committer, change_id, bug ...
+    - Eliminates all commits related to second parent
+      - Including garbage collection for parents of parents ...
+    - Established overall commit ordering
+    """
+    # Annotate master branch
+    annotate_master_branch(commits, master_commit)
+
+    # sanity-check merges (relative to master branch')
+    # check_merge_stats(commits, verbose=verbose)
+
+    # populate pruning last from merge commits
+    prune = []
+    for c in commits.values():
+        if is_merge_commit(c):
+            c['merge_commit'] = True
+            prune.append(c['parents'][1])
+            combine_merge_commit(c, commits)
+        else:
+            c['merge_commit'] = False
+
+    if verbose:
+        print 'initial commmits to be pruned:', len(prune)
+        print 'starting commits:', len(commits)
+
+    # prune commits and any predicessor commits no on master branch
+    runaway = 100000
+    while prune and runaway > 0:
+        runaway -= 1
+        cid = prune[0]
+        del prune[0]
+        if cid not in commits:
+            continue
+        c = commits[cid]
+
+        for p in c['parents']:
+            if p in commits and not commits[p]['on_master_branch']:
+                prune.append(p)
+        del commits[cid]
+
+    # order commits based on timestamp
+    commit_order = [[c['cid'], c['date']] for c in commits.values()]
+    commit_order = sorted(commit_order, key=lambda z: z[1])
+    for i, (cid, _) in enumerate(commit_order):
+        commits[cid]['order'] = i + 1
+
+    if verbose:
+        print 'commits after pruning:', len(commits)
+
+
+#
+# Top Level Routines
+#
+
+
+def build_git_commits(project, repo_name, update=True, include_patch=True):
     """Top level routine to generate commit data """
 
     repo = Repo(repo_name)
@@ -331,9 +472,14 @@ def build_git_commits(project, repo_name, update=True):
     commits = process_commits(repo, commits)
     print
     print 'total commits:', len(commits)
-    print 'Augment Git data with patch info'
-    commits = update_commits_with_patch_data(commits, project)
-    print
+    if include_patch:
+        print 'Augment Git data with patch info'
+        commits = update_commits_with_patch_data(commits, project)
+        print
+
+    print 'Consolidate Git Merge related commits'
+    consolidate_merge_commits(commits, get_git_master_commit(repo_name))
+
     print 'Augment Git data with ordering info'
     git_annotate_order(commits, repo_name)
     print
@@ -790,20 +936,6 @@ def load_combined_commits(project):
 #
 
 
-def git_annotate_commit_order(commits, repo_name):
-    """Order of change within overall project - project maturity"""
-    repo = Repo(repo_name)
-
-    for k in commits.keys():    # Set initial value
-        commits[k]['order'] = -1
-
-    ordered_commits = [c.hexsha for c in repo.iter_commits('master')]
-    ordered_commits.reverse()
-
-    for i, k in enumerate(ordered_commits):
-        commits[k]['order'] = i + 1  # +1, enumerate starts with 0
-
-
 def git_annotate_author_order(commits):
     """Order of change by author - author maturity"""
     author_commits = collections.defaultdict(list)
@@ -849,12 +981,11 @@ def git_annotate_file_order_by_author(commits):
 
 def git_annotate_order(commits, repo_name):
     """ Annotates commits with ordering information
-        - Overall commit order
+        - Overall commit order   [handled in consolidate_merge_commits()]
         - Order of commit on a per-file basis
         - Order of commits by author
         - Order of commits by author on per-file basis
     """
-    git_annotate_commit_order(commits, repo_name)
     git_annotate_author_order(commits)
     git_annotate_file_order(commits)
     git_annotate_file_order_by_author(commits)
