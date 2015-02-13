@@ -46,7 +46,13 @@
 # - 2/3/15 - Enhanced build_all_blame to avoid re-computing large blame entries
 # - 2/6/15 - cleaned-up filter_bug_fix_commits() and
 #            filter_bug_fix_combined_commits()
-# - 2/12/15 - Multiple new routines to handle git merge consolidation
+# - 2/13/15 - Multiple new routines to handle git merge consolidation
+# - 2/13/15 - moved file filter values to config variable FILTER_FILE_SUFFIX
+#             process_commit_files(), process_commit_details() and
+#             annotate_commit_loc().  Also extended to exclude certain
+#             file prefixes
+# - 2/13/15 - Disable patch data annotation by default in build_git_commits()
+#             Enhancements to merge code appear to make this obsolete.
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -76,6 +82,17 @@ from jp_load_dump import convert_to_builtin_type, pload, pdump, jload, jdump
 from subprocess import Popen, PIPE, STDOUT
 from multiprocessing import Pool
 
+
+#
+# Configuration Variables
+#
+
+FILTER_FILE_SUFFIX = ['py', 'sh', 'js', 'c', 'go', 'sh']
+
+
+def GET_FILE_EXCLUDE_PREFIXES(project):
+    return [project + '/tests/', 'tools/']
+
 #
 # Helper
 #
@@ -92,6 +109,15 @@ def project_to_fname(project, patches=False, combined=False,
     else:
         return prefix + project + "_commits.jsonz"
 
+
+def filter_file(fname, exclude_prefixes, include_suffixes):
+    for prefix in exclude_prefixes:
+        if fname.startswith(prefix):
+            return False
+    for suffix in include_suffixes:
+        if fname.endswith(suffix):
+            return True
+    return False
 
 #
 # Parse Commit Messages
@@ -165,7 +191,7 @@ def parse_msg(msg, patch=False):
 # Basic Commit Processing
 #
 
-def process_commits(repo, commits, max_count=False):
+def process_commits(repo, commits, max_count=False, excludes=[]):
     """Extracts all commit from git repo, subject to max_count limit"""
     total_operations = 0
     total_errors = 0
@@ -181,7 +207,7 @@ def process_commits(repo, commits, max_count=False):
                             'cid': c.hexsha,
                             'committer': convert_to_builtin_type(c.committer),
                             'msg': c.message.encode('ascii', 'ignore'),
-                            'files': process_commit_files(c),
+                            'files': process_commit_files(c, excludes),
                             'parents': [p.hexsha for p in c.parents]}
 
             commits[cid].update(parse_msg(c.message))
@@ -202,7 +228,7 @@ def process_commits(repo, commits, max_count=False):
     return commits
 
 
-def process_commit_files(c, filt=['py', 'sh', 'js', 'c', 'go', 'sh', 'conf']):
+def process_commit_files(c, excludes=[], filt=FILTER_FILE_SUFFIX):
     """Determine files associated with an individual commit"""
 
     files = []
@@ -211,21 +237,26 @@ def process_commit_files(c, filt=['py', 'sh', 'js', 'c', 'go', 'sh', 'conf']):
         i = c.diff(p, create_patch=False)
 
         for d in i.iter_change_type('A'):
-            if d.b_blob and d.b_blob.path.split('.')[-1] in filt:
+            if d.b_blob and filter_file(d.b_blob.path.split('.')[-1],
+                                        excludes, filt):
                 files.append(d.b_blob.path)
 
         for d in i.iter_change_type('D'):
-            if d.a_blob and d.a_blob.path.split('.')[-1] in filt:
+            if d.a_blob and filter_file(d.a_blob.path.split('.')[-1],
+                                        excludes, filt):
                 files.append(d.a_blob.path)
 
         for d in i.iter_change_type('R'):
-            if d.a_blob and d.a_blob.path.split('.')[-1] in filt:
+            if d.a_blob and filter_file(d.a_blob.path.split('.')[-1],
+                                        excludes, filt):
                 files.append(d.a_blob.path)
-            if d.b_blob and d.b_blob.path.split('.')[-1] in filt:
+            if d.b_blob and filter_file(d.b_blob.path.split('.')[-1],
+                                        excludes, filt):
                 files.append(d.b_blob.path)
 
         for d in i.iter_change_type('M'):
-            if d.b_blob and d.b_blob.path.split('.')[-1] in filt:
+            if d.b_blob and filter_file(d.b_blob.path.split('.')[-1],
+                                        excludes, filt):
                 files.append(d.b_blob.path)
 
     return files
@@ -458,18 +489,20 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
 #
 
 
-def build_git_commits(project, repo_name, update=True, include_patch=True):
+def build_git_commits(project, repo_name, update=True, include_patch=False):
     """Top level routine to generate commit data """
 
     repo = Repo(repo_name)
     assert repo.bare is False
+
+    exclude_file_prefix = GET_FILE_EXCLUDE_PREFIXES(project)
 
     if update:
         commits = load_git_commits(project)
     else:
         commits = collections.defaultdict(list)
 
-    commits = process_commits(repo, commits)
+    commits = process_commits(repo, commits, excludes=exclude_file_prefix)
     print
     print 'total commits:', len(commits)
     if include_patch:
@@ -484,7 +517,7 @@ def build_git_commits(project, repo_name, update=True, include_patch=True):
     git_annotate_order(commits, repo_name)
     print
     print 'Augment Git data with lines-of-code changed'
-    annotate_commit_loc(commits, repo_name)
+    annotate_commit_loc(commits, repo_name, excludes=exclude_file_prefix)
     jdump(commits, project_to_fname(project))
 
 
@@ -610,7 +643,7 @@ def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
 
 
 def process_commit_details(cid, repo, repo_name,
-                           filt=['py', 'sh', 'js', 'c', 'go', 'sh', 'conf']):
+                           excludes=[], filt=FILTER_FILE_SUFFIX):
     """Process individual commit, computing diff and identifying blame.
        Exclude non-source files
     """
@@ -626,7 +659,8 @@ def process_commit_details(cid, repo, repo_name,
               for p in c.parents    # iterate through each parent
               for d in c.diff(p, create_patch=True).iter_change_type('M')
               if (d.a_blob and d.b_blob
-                  and d.b_blob.path.split('.')[-1] in filt
+                  and filter_file(d.b_blob.path.split('.')[-1],
+                                  excludes, filt)
                   and str(d.a_blob) != git.objects.blob.Blob.NULL_HEX_SHA
                   and str(d.b_blob) != git.objects.blob.Blob.NULL_HEX_SHA
                   and d.a_blob.size != 0
@@ -638,7 +672,8 @@ def process_commit_details(cid, repo, repo_name,
     return dict(blame)
 
 
-def compute_all_blame(bug_fix_commits, repo, repo_name, start=0, limit=1000000,
+def compute_all_blame(bug_fix_commits, repo, repo_name, excludes=[],
+                      start=0, limit=1000000,
                       keep=set(['lineno', 'orig_lineno', 'commit', 'text'])):
     """Top level iterator for computing diff & blame for a list of commits"""
     progress = 0
@@ -647,7 +682,7 @@ def compute_all_blame(bug_fix_commits, repo, repo_name, start=0, limit=1000000,
     for cid in bug_fix_commits[start:start+limit]:
         all_blame.append(
             {'cid': cid,
-             'blame': process_commit_details(cid, repo, repo_name)})
+             'blame': process_commit_details(cid, repo, repo_name, excludes)})
 
         progress += 1
         # if progress % 100 == 0:
@@ -709,22 +744,6 @@ def filter_bug_fix_commits(v, importance='low+', status='fixed'):
            and v['status'] and v['status'] in status
            )
 
-#deleteme
-def xfilter_bug_fix_commits(v):
-    importance = ['Critical', 'High',
-                  # 'Medium', 'Low', 'Wishlist',
-                  # 'Unknown', 'Undecided'
-                  ]
-
-    status = ['Fix Committed', 'Fix Released',
-              # 'New', 'Incomplete', 'Opinion', 'Invalid',
-              # "Won't Fix", 'Expired', 'Confirmed', 'Triaged',
-              # 'In Progress', 'Incomplete',
-              ]
-    return('lp:importance' in v and 'lp:status' in v
-           and v['lp:importance'] and v['lp:importance'] in importance
-           and v['lp:status'] and v['lp:status'] in status)
-
 
 def build_all_blame(project, combined_commits, repo_name, update=True,
                     filt=filter_bug_fix_combined_commits):
@@ -733,6 +752,7 @@ def build_all_blame(project, combined_commits, repo_name, update=True,
     """
 
     repo = Repo(repo_name)
+    exclude_file_prefix = GET_FILE_EXCLUDE_PREFIXES(project)
     bug_fix_commits = set([k for k, v in combined_commits.items()
                            if filt(v)])
     print 'bug fix commits:', len(bug_fix_commits)
@@ -748,7 +768,8 @@ def build_all_blame(project, combined_commits, repo_name, update=True,
     else:
         new_blame = list(bug_fix_commits)
 
-    all_blame = compute_all_blame(new_blame, repo, repo_name)
+    all_blame = compute_all_blame(new_blame, repo, repo_name,
+                                  exclude_file_prefix)
     # prune huge entries
     for x in all_blame:
         prune_huge_blame(x)
@@ -992,7 +1013,7 @@ def git_annotate_order(commits, repo_name):
 
 
 def annotate_commit_loc(commits, repo_name,
-                        filt=['py', 'sh', 'js', 'c', 'go', 'sh']):
+                        excludes=[], filt=FILTER_FILE_SUFFIX):
     """Computes lines of code changed """
 
     repo = git.Repo(repo_name)
@@ -1007,7 +1028,8 @@ def annotate_commit_loc(commits, repo_name,
 
             for p in c.parents:    # iterate through each parent
                 for d in c.diff(p, create_patch=True):
-                    if d.a_blob and d.a_blob.path.split('.')[-1] in filt:
+                    if d.a_blob and filter_file(d.a_blob.path.split('.')[-1],
+                                                excludes, filt):
                         fname = d.a_blob.path
                         adds = sum([1 for txt in d.diff.splitlines()
                                     if txt.startswith('+')]) - 1
