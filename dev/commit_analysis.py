@@ -461,14 +461,23 @@ def get_blame_by_commit(combined_commits, all_blame):
 def compute_guilt(combined_commits, all_blame, importance='high+'):
     for c in combined_commits.values():  # initialize guilt values
         c['guilt'] = 0.0
-
+    skipped = 0
+    instances = 0
     for be in all_blame:    # now apply weighted guilt for each blame
         v = combined_commits[be['cid']]
         if filter_bug_fix_combined_commits(v, importance=importance):
             for c, g in \
                     blame_compute_normalized_guilt(be,
                                                    exp_weighting=True).items():
-                combined_commits[c]['guilt'] += g
+                if c in combined_commits:
+                    combined_commits[c]['guilt'] += g
+                else:
+                    skipped += 1
+                instances += 1
+    if skipped > 0:
+        print
+        print 'Warning - compute_guilt:  Skipped', skipped, 'entries out of',
+        print instances
 
     total = len(combined_commits)
     guilty = sum([1 for v in combined_commits.values() if v['guilt'] > 0])

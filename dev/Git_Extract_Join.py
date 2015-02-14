@@ -57,9 +57,11 @@
 #             and build_git_commits()
 # - 2/13/15 - Modify process_commit_files(), process_commit_details()
 #             and annotate_commit_loc() to only follow primary parent [0]
-# -2/13/15  - Allow commits file to remember pruned entries (represented
+# - 2/13/15 - Allow commits file to remember pruned entries (represented
 #             as False). Add option load_git_commits() to filter prunced
 #             entries to avoid impact to downstream code.
+# - 2/13/15 - Second attempt at pruning, this time using tombstones.  Also
+#             remember ancestory for pruned commits.
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -413,18 +415,22 @@ def combine_merge_commit(c, commits):
         c['bug'] = parent['bug']
 
     c['msg'] = c['msg'] + '\n' + parent['msg']
-    c['parents'] = c['parents'][0:1]
+    # c['parents'] = c['parents'][0:1]
 
 
 def annotate_master_branch(commits, master_commit):
     """Master branch is considered as lineage from Master
     commit by following first parent
     """
-    # Annotate master branch
+    # Reset branch-related values
     for v in commits.values():
-        if v:
-            v['on_master_branch'] = False
+        v['on_master_branch'] = False
+        v['is_master'] = False
+        v['ancestor'] = False
+        v['tombstone'] = False
+        v['merge_commit'] = False
 
+    commits[master_commit]['is_master'] = True
     current = master_commit
     runaway = 10000
 
@@ -437,6 +443,8 @@ def annotate_master_branch(commits, master_commit):
         else:
             current = False
 
+    return commits
+
 
 def consolidate_merge_commits(commits, master_commit, verbose=True):
     """Clean-up for Git Merge commits (non-fast fordward)
@@ -447,21 +455,22 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
     - Established overall commit ordering
     """
     # Annotate master branch
-    annotate_master_branch(commits, master_commit)
+    print 'Master Commit:', master_commit
+    commits = annotate_master_branch(commits, master_commit)
 
     # sanity-check merges (relative to master branch')
     # check_merge_stats(commits, verbose=verbose)
 
     # populate pruning last from merge commits
-    prune = []
+    prune = []    # prune entries [cid, ancestor_cid]
     for c in commits.values():
-        if c:
-            if is_merge_commit(c):
-                c['merge_commit'] = True
-                prune.append(c['parents'][1])
-                combine_merge_commit(c, commits)
-            else:
-                c['merge_commit'] = False
+        if is_merge_commit(c):
+            c['merge_commit'] = True
+            for p in c['parents'][1:]:
+                prune.append([p, c['cid']])
+            combine_merge_commit(c, commits)
+        else:
+            c['merge_commit'] = False
 
     if verbose:
         print 'initial commmits to be pruned:', len(prune)
@@ -471,7 +480,7 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
     runaway = 100000
     while prune and runaway > 0:
         runaway -= 1
-        cid = prune[0]
+        cid, ancestor_cid = prune[0]
         del prune[0]
         if cid not in commits or not commits[cid]:
             continue
@@ -480,18 +489,20 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
         for p in c['parents']:
             if (p in commits and commits[p]
                and not commits[p]['on_master_branch']):
-                prune.append(p)
-        commits[cid] = False  # empty commit implies pruning
+                prune.append([p, ancestor_cid])
+        commits[cid]['tombstone'] = True
+        commits[cid]['ancestor'] = ancestor_cid
 
     # order commits based on timestamp
-    commit_order = [[c['cid'], c['date']] for c in commits.values() if c]
+    commit_order = [[c['cid'], c['date']] for c in commits.values()
+                    if not c['tombstone']]
     commit_order = sorted(commit_order, key=lambda z: z[1])
     for i, (cid, _) in enumerate(commit_order):
         commits[cid]['order'] = i + 1
 
     if verbose:
         print 'commits after pruning:',
-        print sum([1 for c in commits.values() if c])
+        print sum([1 for c in commits.values() if not c['tombstone']])
 
     return commits
 
@@ -547,16 +558,10 @@ def load_git_commits(project, prune=True):
     name = project_to_fname(project)
     result = jload(name)
 
-    if prune:
-        for k, v in result.items():
-            if not v:
-                del result[k]
-
     print 'total git_commits:', len(result)
-    if not prune:
-        pruned = sum([1 for v in result.values() if not v])
-        print '  actual commits:', len(result) - pruned
-        print '  pruned commits:', pruned
+    pruned = sum([1 for v in result.values() if v['tombstone']])
+    print '  actual commits:', len(result) - pruned
+    print '  pruned commits:', pruned
     print 'bug fix commits:', sum([1 for x in result.values()
                                    if x and 'bug' in x])
     print 'commits with change_id:', sum([1 for x in result.values()
@@ -1009,7 +1014,7 @@ def git_annotate_author_order(commits):
     author_commits = collections.defaultdict(list)
 
     for k, c in commits.items():
-        if c:
+        if not c['tombstone']:
             author_commits[c['author']].append((c['order'], k))
 
     for author, val in author_commits.items():
@@ -1022,7 +1027,7 @@ def git_annotate_file_order(commits):
     file_commits = collections.defaultdict(list)
 
     for k, c in commits.items():
-        if c:
+        if not c['tombstone']:
             for fname in c['files']:
                 file_commits[fname].append((c['order'], k))
             c['file_order'] = {}    # Use this as oppty to track on new field
@@ -1038,7 +1043,7 @@ def git_annotate_file_order_by_author(commits):
         lambda: collections.defaultdict(list))
 
     for k, c in commits.items():
-        if c:
+        if not c['tombstone']:
             for fname in c['files']:
                 file_commits_by_author[fname][c['author']].append((c['order'],
                                                                    k))
@@ -1070,7 +1075,7 @@ def annotate_commit_loc(commits, repo_name,
     repo = git.Repo(repo_name)
     total_operations = 0
     for commit in commits.values():
-        if commit and 'loc_add' not in commit:
+        if not commit['tombstone'] and 'loc_add' not in commit:
             # print commit['cid']
             c = repo.commit(commit['cid'])
             loc_add = 0
@@ -1119,7 +1124,7 @@ def get_authors_and_files(commits):
     authors = {}
     files = {}
     for c in commits.values():
-        if c:
+        if not c['tombstone']:
             authors[c['author']] = 1
             for fn in c['files']:
                 files[fn] = 1
