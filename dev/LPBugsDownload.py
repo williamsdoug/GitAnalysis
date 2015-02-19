@@ -6,14 +6,19 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 1/25/2015
+# Last updated 2/19/2015
 #
 # History:
-# - 9/1/2014: Converted from iPython notebook, added callable interfaces
+# - 9/1/2014:  Converted from iPython notebook, added callable interfaces
 # - 9/10/2014: Fixed debug comments
 # - 1/25/2015: PEP-8 clean-up
-# - 2/5/2015: removed references to project='nova'
-# - 2/5/2015: created annotate_bug_status().  Only download fixed bugs
+# - 2/5/2015:  removed references to project='nova'
+# - 2/5/2015:  created annotate_bug_status().  Only download fixed bugs
+# - 2/18/2015: Change lp_parse_messages() to parse multiple git cid and
+#              Change-Id sets.  Values now stored in ['commits'] of
+#              bug entry.
+# - 2/19/2015: Extended lp_parse_messages to identify commits prefixed by
+#              https://git.openstack.org/cgit/openstack/glance/commit/?id=
 #
 # Top Level Routines:
 #    from LPBugsDownload import build_lp_bugs, load_lp_bugs
@@ -222,23 +227,28 @@ def pickle_clean(foo):
 
 
 def lp_parse_messages(messages):
-    """Extracts additional metadata from bug messages """
-    result = {}
+    """Extracts commit metadata from bug messages """
+    all_data = []
 
     for msg in messages:
+        result = {}
         txt = msg['content']
-        if 'Change-Id: I' in txt:
-            for line in txt.split('\n'):
-                if 'Reviewed:  https://review.openstack.org/' in line:
-                    review = line.split('/')[-1]
-                    result['review'] = review
-                elif 'Change-Id: I' in line:
-                    change_id = line.split(':')[-1].strip()
-                    result['change_id'] = change_id
-                elif 'Committed: http://github.com/openstack/' in line:
-                    commit = line.split('/')[-1]
-                    result['cid'] = commit
-    return result
+
+        for line in txt.split('\n'):
+            if 'Change-Id: I' in line:
+                change_id = line.split(':')[-1].strip()
+                result['change_id'] = change_id
+            elif 'Committed: http://github.com/openstack/' in line:
+                commit = line.split('/')[-1]
+                result['cid'] = commit
+            elif ('https://git.openstack.org/cgit/openstack/glance/commit/?id='
+                  in line):
+                commit = line.split('=')[-1]
+                result['cid'] = commit
+
+        if 'change_id' in result and 'cid' in result:
+            all_data.append(result)
+    return all_data
 
 
 def annotate_bug_status(bugs, project):
@@ -342,10 +352,9 @@ def load_lp_bugs(project):
     # now annotate bug entry with additional content, if available
     found = 0
     for k, bug in x.items():
-        ret = lp_parse_messages(bug['messages'])
-        if ret != {}:
+        x[k]['commits'] = lp_parse_messages(bug['messages'])
+        if len(x[k]['commits']) > 0:
             found += 1
-            x[k].update(ret)
 
     # print 'Object type:', type(x)
     print 'total LP bugs:', len(x)

@@ -61,7 +61,12 @@
 #             as False). Add option load_git_commits() to filter prunced
 #             entries to avoid impact to downstream code.
 # - 2/13/15 - Second attempt at pruning, this time using tombstones.  Also
-#             remember ancestory for pruned commits.
+#             remember ancestry for pruned commits.
+# - 2/17/15 - New parse_bugs() routine returns potentially multiple bugs
+#             per commit.  Renamed field from commit['bug'] to commit['bugs']
+# - 2/17/15 - Added aggregate_merge_bugs_and_changes() to merge flow
+# - 2/17/15 - Temporarily disable combine_merge_commit(), move to a
+#             post-processing step.
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -95,6 +100,8 @@ from multiprocessing import Pool
 #
 # Configuration Variables
 #
+
+INSANELY_HUGE_MASTER_BRANCH_DISTANCE = 1000000000
 
 FILTER_FILE_SUFFIX = ['py', 'sh', 'js', 'c', 'go', 'sh']
 
@@ -132,11 +139,37 @@ def filter_file(fname, exclude_prefixes, include_suffixes):
 # Parse Commit Messages
 #
 
+RE_GERRIT_TEMPLATE = re.compile('(I([a-f0-9]){40})')
+
+
+def parse_all_changes(msg):
+    """Parses all Change-Id: entries, typically on one per commit
+
+    Example:
+    parse_all_changes('Change-Id: I8fa8c4f36892b96d406216cb3c64854a94ca9df7')
+
+    >>> 'I8fa8c4f36892b96d406216cb3c64854a94ca9df7'
+    """
+    result = []
+    for line in msg.split('\n'):
+        m = RE_GERRIT_TEMPLATE.search(line)
+        if line.lower().startswith('change') and m:
+            result.append(m.group(1))
+
+    result = list(set(result))  # dedupe
+    if len(result) > 1:
+        return result
+    elif len(result) == 1:
+        return result[0]
+    else:
+        return False
+
+"""
+
 change_template = re.compile('Change-Id:\s*(\S+)', re.IGNORECASE)
 
-
 def parse_change(txt):
-    """Extracts and fixes case in Change-Id """
+    "Extracts and fixes case in Change-Id "
     txt = txt.lower()
     m = change_template.search(txt)
     if m:
@@ -147,13 +180,109 @@ def parse_change(txt):
     else:
         # print txt
         return {}
-
+"""
 
 bug_template = re.compile('bug[s:\s/-]*(?:lp|lp:|lp:#|lp:)*[\s#]*(\d+)',
                           re.IGNORECASE)
 
 
-def parse_bug(txt):
+def parse_bugs(msg):
+    """Extracts all bug id's from commit message"""
+    bugs = []
+    msg = msg.lower()
+    for line in msg.split('\n'):
+        if 'bug' not in line:
+            # print 'rejected'
+            continue
+
+        # Immediate Acceptance
+        if (line.startswith('closes')
+                or line.startswith('fixes bug')
+                or line.startswith('bug')
+                or line.startswith('lp bug')
+                or line.startswith('partial')
+                or line.startswith('resolves')
+                or line.startswith('backport for bug')):
+            pass
+
+        # Check for immediate rejections:
+        elif ('depends on' in line
+              or 'related' in line
+              or 'http:/' in line
+              or 'https://' in line
+              or '/bug' in line
+              ):
+
+            continue
+        # More complex acceptances
+        elif not ('fix' in line
+                  or '* bug' in line
+                  or 'resolves bug' in line
+                  or 'refer to bug' in line
+                  or 'addresses bug' in line
+                  ):
+            continue
+
+        m = bug_template.search(line)
+        if m:
+            bugs.append(m.group(1))
+    return list(set(bugs))
+
+
+def test_parse_bugs():
+    true_tests = ['fixed bug #1185609',
+                  'Closes-bug: 1250158',
+                  'Closes-Bug: #1300546',
+                  'Partial-bug: #1277104',
+                  'Fixes bug 1074132.',
+                  'Fixes LP Bug#879136 - keyerror',
+                  'Fixes: bug #1175815',
+                  'This is a continuous fix to bug #1166957',
+                  'This change fixes bug #1010560.',
+                  'Bug #930543',
+                  'Addresses bug 1154606.',
+                  'Resolves bug 1030396.',
+                  'Fixing bug 794582 - Now able to stream http(s) images',
+                  'Disambiguates HTTP 401 and HTTP 403 in Glance. '
+                  + 'Fixes bug 956513.'
+                  'be removed from disk safely or not. Resolves bug 1030742.',
+                  'check connection in Listener. refer to Bug #943031',
+                  '  * Bug 955475',
+                  'LP Bug#912800 - Delete image remain in cache',
+                  'Fixes bug 1059634. Related to '
+                  + 'I6cff4ee7f6c1dc970397b66fd2d15fa22b0a63a3',
+                  'Backport for bug 803055',
+                  'This addresses bug 767344.',
+                  ]
+
+    false_tests = ['Related-Bug: 1367908',
+                   'launchpad bug https:'
+                   + '//bugs.launchpad.net/oslo/+bug/1158807.',
+                   'side effect it tests for the problem found '
+                   + 'in bug: 1068051',
+                   'currently impossible due to bug 1042925.',
+                   'depends on bug 1214830',
+                   'Prevent regression on bug 888370',
+                   'pipes@serialcoder:~/repos/glance/bug730213$ '
+                   + 'GLANCE_TEST_MIGRATIONS_CONF=/tmp/glance_test_'
+                   + 'migrations.conf ./run_tests.sh -V test',
+                   ]
+
+    # testing positive matches
+    for test in true_tests:
+        bugs = parse_bugs(test)
+        if len(bugs) == 0:
+            print bugs, test
+
+    # testing negative matches
+    for test in false_tests:
+        bugs = parse_bugs(test)
+        if len(bugs) != 0:
+            print bugs, test
+
+
+# Legacy, delete once new join code complete
+def old_parse_bug(txt):
     """Extracts bug id """
     txt = txt.lower()
     m = bug_template.search(txt)
@@ -170,23 +299,32 @@ def parse_msg(msg, patch=False):
     result = {}
     if not msg:
         return {}
-    for line in msg.split('\n'):
-        lline = line.lower()
-        # if 'bug' in yy or 'change' in yy:
-        if 'change' in lline:
-            result.update(parse_change(line))
-        elif 'bug' in lline:
-            result.update(parse_bug(line))
-        if patch:
+
+    bugs = parse_bugs(msg)
+    if bugs:
+        result['bugs'] = bugs
+
+    changes = parse_all_changes(msg)
+    if changes:
+        result['change_id'] = changes
+
+    if patch:
+        for line in msg.split('\n'):
+            lline = line.lower()
+            # if 'bug' in yy or 'change' in yy:
+            # if 'change' in lline:
+            #     result.update(parse_change(line))
+            # if 'bug' in lline:
+            #    result.update(old_parse_bug(line))
             if line.startswith('From: '):
                 try:
-                    result.update({'pAuth': '<git.Actor "'
-                                            + line[len('From: '):]+'">'})
+                    result['pAuth'] = '<git.Actor "'
+                    + line[len('From: '):]+'">'
                 except Exception:
                     pass
             elif line.startswith('Subject: '):
                 try:
-                    result.update({'pSummary': line[len('Subject: '):]})
+                    result['pSummary'] = line[len('Subject: '):]
                 except Exception:
                     pass
 
@@ -214,6 +352,8 @@ def process_commits(repo, commits, max_count=False, excludes=[]):
                             'committer': convert_to_builtin_type(c.committer),
                             'msg': c.message.encode('ascii', 'ignore'),
                             'files': process_commit_files(c, excludes),
+                            'unfiltered_files':
+                                process_commit_files_unfiltered(c),
                             'parents': [p.hexsha for p in c.parents]}
 
             commits[cid].update(parse_msg(c.message))
@@ -232,6 +372,9 @@ def process_commits(repo, commits, max_count=False, excludes=[]):
         print 'Commits skipped due to error:', total_errors
 
     return commits
+
+# TO DO: rewrite process_commit_files to use results from
+# process_commit_files_unfiltered
 
 
 def process_commit_files(c, excludes=[], filt=FILTER_FILE_SUFFIX):
@@ -269,6 +412,32 @@ def process_commit_files(c, excludes=[], filt=FILTER_FILE_SUFFIX):
 
     return files
 
+
+def process_commit_files_unfiltered(c):
+    """Determine files associated with an individual commit"""
+
+    files = []
+    # for p in c.parents:    # iterate through each parent
+    if len(c.parents) > 0:
+        p = c.parents[0]
+        i = c.diff(p, create_patch=False)
+
+        for d in i.iter_change_type('A'):
+            if d.b_blob:
+                files.append(d.b_blob.path)
+
+        for d in i.iter_change_type('D'):
+            if d.a_blob:
+                files.append(d.a_blob.path)
+
+        for d in i.iter_change_type('R'):
+            if d.b_blob:
+                files.append(d.b_blob.path)
+
+        for d in i.iter_change_type('M'):
+            if d.b_blob:
+                files.append(d.b_blob.path)
+    return files
 
 hdr_re = re.compile('@@\s+-(?P<nstart>\d+)(,(?P<nlen>\d+))?\s+\+'
                     + '(?P<pstart>\d+)(,(?P<plen>\d+))?\s+@@')
@@ -414,7 +583,7 @@ def combine_merge_commit(c, commits):
     if 'bug' not in c and 'bug' in parent:
         c['bug'] = parent['bug']
 
-    c['msg'] = c['msg'] + '\n' + parent['msg']
+    # c['msg'] = c['msg'] + '\n' + parent['msg']
     # c['parents'] = c['parents'][0:1]
 
 
@@ -425,12 +594,14 @@ def annotate_master_branch(commits, master_commit):
     # Reset branch-related values
     for v in commits.values():
         v['on_master_branch'] = False
+        v['master_branch_distance'] = INSANELY_HUGE_MASTER_BRANCH_DISTANCE
         v['is_master'] = False
-        v['ancestor'] = False
+        v['ancestors'] = False
         v['tombstone'] = False
         v['merge_commit'] = False
 
     commits[master_commit]['is_master'] = True
+    commits[master_commit]['master_branch_distance'] = 0
     current = master_commit
     runaway = 10000
 
@@ -438,11 +609,45 @@ def annotate_master_branch(commits, master_commit):
         runaway -= 1
         c = commits[current]
         c['on_master_branch'] = True
+        c['master_branch_distance'] = 0
         if c['parents']:
             current = c['parents'][0]
         else:
             current = False
 
+    return commits
+
+
+def aggregate_merge_bugs_and_changes(commits):
+    """Associates bugs and changes with each merge commit"""
+    for k, c in commits.items():  # Initialize
+        if c['on_master_branch']:
+            commits[k]['all_bugs'] = []
+            commits[k]['all_changes'] = []
+            commits[k]['children'] = []
+
+    for k, c in commits.items():  # Accumulate bugs and changes for children
+        if not c['on_master_branch']:
+            a = c['ancestors'][0]
+            if not a:
+                continue
+
+            commits[a]['children'].append(k)
+
+            if 'bugs' in c:
+                commits[a]['all_bugs'] = commits[a]['all_bugs'] + c['bugs']
+
+            if 'change_id' in c:
+                if type(c['change_id']) is list:
+                    for change in c['change_id']:
+                        commits[a]['all_changes'].append(change)
+                else:
+                    commits[a]['all_changes'].append(c['change_id'])
+
+    for k, c in commits.items():  # Dedupe results
+        if c['on_master_branch']:
+            commits[k]['all_bugs'] = list(set(commits[k]['all_bugs']))
+            commits[k]['all_changes'] = list(set(commits[k]['all_changes']))
     return commits
 
 
@@ -462,13 +667,14 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
     # check_merge_stats(commits, verbose=verbose)
 
     # populate pruning last from merge commits
-    prune = []    # prune entries [cid, ancestor_cid]
+    prune = []    # prune entries [cid, ancestors]
     for c in commits.values():
         if is_merge_commit(c):
             c['merge_commit'] = True
             for p in c['parents'][1:]:
-                prune.append([p, c['cid']])
-            combine_merge_commit(c, commits)
+                ancestors = [c['cid']]
+                prune.append([p, ancestors])
+            # combine_merge_commit(c, commits)
         else:
             c['merge_commit'] = False
 
@@ -480,7 +686,7 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
     runaway = 100000
     while prune and runaway > 0:
         runaway -= 1
-        cid, ancestor_cid = prune[0]
+        cid, ancestors = prune[0]
         del prune[0]
         if cid not in commits or not commits[cid]:
             continue
@@ -489,9 +695,12 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
         for p in c['parents']:
             if (p in commits and commits[p]
                and not commits[p]['on_master_branch']):
-                prune.append([p, ancestor_cid])
+                prune.append([p, ancestors + [cid]])
         commits[cid]['tombstone'] = True
-        commits[cid]['ancestor'] = ancestor_cid
+        this_branch_distance = len(ancestors)
+        if this_branch_distance < commits[cid]['master_branch_distance']:
+            commits[cid]['ancestors'] = ancestors
+            commits[cid]['master_branch_distance'] = this_branch_distance
 
     # order commits based on timestamp
     commit_order = [[c['cid'], c['date']] for c in commits.values()
@@ -499,6 +708,9 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
     commit_order = sorted(commit_order, key=lambda z: z[1])
     for i, (cid, _) in enumerate(commit_order):
         commits[cid]['order'] = i + 1
+
+    # aggregate bug and change information
+    commits = aggregate_merge_bugs_and_changes(commits)
 
     if verbose:
         print 'commits after pruning:',
@@ -545,9 +757,11 @@ def build_git_commits(project, repo_name, update=True, include_patch=False):
     print 'Augment Git data with ordering info'
     git_annotate_order(commits, repo_name)
 
+    """
     print
     print 'Augment Git data with lines-of-code changed'
     annotate_commit_loc(commits, repo_name, excludes=exclude_file_prefix)
+    """
 
     jdump(commits, project_to_fname(project))
 
