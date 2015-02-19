@@ -19,6 +19,7 @@
 #              bug entry.
 # - 2/19/2015: Extended lp_parse_messages to identify commits prefixed by
 #              https://git.openstack.org/cgit/openstack/glance/commit/?id=
+# - 2/19/2015:  Support directed updated in build
 #
 # Top Level Routines:
 #    from LPBugsDownload import build_lp_bugs, load_lp_bugs
@@ -181,13 +182,13 @@ def fetch_unique_bugno(project_name):
     """Generated list of bug id numbers from Launchpad """
     unique_bugs = {}
     project = lp.distributions[project_name]
-    bug_tasks = project.searchTasks(status=['Fix Committed', 'Fix Released'])
-    # bug_tasks = project.searchTasks(status=['Confirmed', 'In Progress',
-    #                                         'Fix Committed', 'Fix Released'])
+    # bug_tasks = project.searchTasks(status=['Fix Committed', 'Fix Released'])
+    bug_tasks = project.searchTasks(status=['Confirmed', 'In Progress',
+                                            'Fix Committed', 'Fix Released'])
     for b in bug_tasks:
         bugno = str(b).split('/')[-1]
         unique_bugs[bugno] = 1
-    return unique_bugs
+    return unique_bugs.keys()
 
 
 def fetch_all_bugs(project_name, limit=-1, prior={}):
@@ -197,16 +198,20 @@ def fetch_all_bugs(project_name, limit=-1, prior={}):
 
     unique_bugs = fetch_unique_bugno(project_name)
     print 'total bugs:', len(unique_bugs)
-    new_bugs = [k for k in unique_bugs.keys() if k not in prior]
+    new_bugs = [k for k in unique_bugs if k not in prior]
     print 'bugs to be downloaded:', len(new_bugs)
-
+    count = 0
     for bugno in new_bugs:
-        print '.',
         fetch_bug(bugno)
-
         limit -= 1
+        count += 1
+        if count % 10 == 0:
+            print count,
+        else:
+            print '.',
         if limit == 0:
             return
+    print
 
 
 def pickle_clean(foo):
@@ -300,11 +305,17 @@ def annotate_bug_status(bugs, project):
 #
 
 def build_lp_bugs(project, update=True, limit=-1, cachedir=''):
-    """Top level routine to download bug related data from Launchpad"""
+    """Top level routine to download bug related data from Launchpad
+
+    Update determines whether incremental update is used.  True = incremental
+    Special case with update is list, then specific list of bugno's are
+    fetched
+    """
     global ALL_BUGS
     ALL_BUGS = {}
     global lp
     lp = Launchpad.login_anonymously('just testing', 'production', cachedir)
+    existing_file = False
 
     pname = project_to_fname(project)
     prior = {}
@@ -312,13 +323,28 @@ def build_lp_bugs(project, update=True, limit=-1, cachedir=''):
     if update:
         try:
             prior = jload(pname)
-            os.rename(pname, pname+'.old')
+            existing_file = True
             print 'Total prior bugs:', len(prior)
         except Exception, e:
             prior = {}
+            existing_file = False
 
-    # fetch incremental bugs
-    fetch_all_bugs(project, limit=limit, prior=prior)
+    if type(update) is list or type(update) is set:  # Directed update
+        count = 0
+        print 'Bugs to be downloaded:', len(update)
+        for bugno in update:
+            fetch_bug(bugno)
+            limit -= 1
+            count += 1
+            if count % 10 == 0:
+                print count,
+            else:
+                print '.',
+            if limit == 0:
+                break
+        print
+    else:                        # fetch incremental bugs
+        fetch_all_bugs(project, limit=limit, prior=prior)
 
     # clean-up for pickling
     for k in ALL_BUGS.keys():
@@ -339,6 +365,11 @@ def build_lp_bugs(project, update=True, limit=-1, cachedir=''):
     annotate_bug_status(ALL_BUGS, project)
 
     # save
+    if existing_file:
+        try:
+            os.rename(pname, pname+'.old')
+        except Exception, e:
+            pass
     jdump(ALL_BUGS, pname)
 
 

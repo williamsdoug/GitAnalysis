@@ -67,6 +67,7 @@
 # - 2/17/15 - Added aggregate_merge_bugs_and_changes() to merge flow
 # - 2/17/15 - Temporarily disable combine_merge_commit(), move to a
 #             post-processing step.
+# - 2/19/15 - Extend parse_bugs() to support multiple bugs per line
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -223,9 +224,15 @@ def parse_bugs(msg):
                   ):
             continue
 
+        """
         m = bug_template.search(line)
         if m:
             bugs.append(m.group(1))
+        """
+
+        m = bug_template.findall(line)
+        for x in m:
+            bugs.append(x)
     return list(set(bugs))
 
 
@@ -255,6 +262,9 @@ def test_parse_bugs():
                   'This addresses bug 767344.',
                   ]
 
+    multi_tests = ['Fixes bug 1008874, bug 1046433.',
+                   ]
+
     false_tests = ['Related-Bug: 1367908',
                    'launchpad bug https:'
                    + '//bugs.launchpad.net/oslo/+bug/1158807.',
@@ -272,6 +282,11 @@ def test_parse_bugs():
     for test in true_tests:
         bugs = parse_bugs(test)
         if len(bugs) == 0:
+            print bugs, test
+
+    for test in multi_tests:
+        bugs = parse_bugs(test)
+        if len(bugs) < 2:
             print bugs, test
 
     # testing negative matches

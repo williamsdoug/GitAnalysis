@@ -5,7 +5,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 2/9/2014
+# Last updated 2/19/2014
 #
 # History:
 # - 9/2/14:  Initial version (initially contained in NovaSampleData).
@@ -25,6 +25,7 @@
 #            create_feature(), extract_features()
 # - 2/9/15 - added autoset_threshold() and helper function
 #            count_guilty_commits().  Added fit_features()
+# - 2/19/15 - New consistency checking routine verify_missing_bugs().
 #
 # Top Level Routines:
 #    from commit_analysis import blame_compute_normalized_guilt
@@ -40,6 +41,7 @@
 #    from commit_analysis import load_core_analysis_data
 #    from commit_analysis import load_all_analysis_data
 #    from commit_analysis import rebuild_all_analysis_data
+#    from commit_analysis import verify_missing_bugs
 #
 
 
@@ -68,6 +70,23 @@ from Git_Extract_Join import filter_bug_fix_combined_commits
 # import sys
 # from jp_load_dump import jload
 
+
+#
+# Routines to consistency check Git, Gerrit and Lanuchpad Data
+#
+
+def verify_missing_bugs(commits, all_bugs, project, cachedir):
+    all_bugs_in_commits = set([b for c in commits.values()
+                               if 'bugs' in c for b in c['bugs']])
+    known_bugs = set(all_bugs.keys())
+
+    missing_bugs = all_bugs_in_commits.difference(known_bugs)
+    if len(missing_bugs) > 0:
+        build_lp_bugs(PROJECT, update=missing_bugs, cachedir=cachedir)
+        return load_lp_bugs(project)
+    else:
+        print 'no missing bugs'
+        return all_bugs
 
 #
 # Top level routines to load and update analysis data
@@ -136,6 +155,10 @@ def rebuild_all_analysis_data(project, repo_name, update=True):
     commits = load_git_commits(project)
     all_change_details = load_gerrit_change_details(project)
 
+    print
+    print 'Load any missing bugs'
+    downloaded_bugs = verify_missing_bugs(commits, downloaded_bugs,
+                                          project, cachedir)
     print
     print 'Building combined_commits'
     build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,
