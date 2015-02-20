@@ -68,6 +68,10 @@
 # - 2/17/15 - Temporarily disable combine_merge_commit(), move to a
 #             post-processing step.
 # - 2/19/15 - Extend parse_bugs() to support multiple bugs per line
+# - 2/20/15 - clean-up usage of file_filter, updates to filter_file(),
+#             process_commits(), process_commit_details() and
+#             annotate_commit_loc().  Removed process_commit_files()
+# - 2/20/15 - project_to_fname() leverages configuration data.
 #
 # Top Level Routines:
 #    from Git_Extract_Join import build_git_commits, load_git_commits
@@ -97,6 +101,9 @@ from jp_load_dump import convert_to_builtin_type, pload, pdump, jload, jdump
 from subprocess import Popen, PIPE, STDOUT
 from multiprocessing import Pool
 
+from git_analysis_config import get_filter_config
+from git_analysis_config import get_repo_name, get_corpus_dir
+
 
 #
 # Configuration Variables
@@ -104,19 +111,14 @@ from multiprocessing import Pool
 
 INSANELY_HUGE_MASTER_BRANCH_DISTANCE = 1000000000
 
-FILTER_FILE_SUFFIX = ['py', 'sh', 'js', 'c', 'go', 'sh']
-
-
-def GET_FILE_EXCLUDE_PREFIXES(project):
-    return [project + '/tests/', 'tools/']
 
 #
 # Helper
 #
 
 
-def project_to_fname(project, patches=False, combined=False,
-                     blame=False, prefix='./Corpus/'):
+def project_to_fname(project, patches=False, combined=False, blame=False):
+    prefix = get_corpus_dir(project)
     if patches:
         return prefix + project + "_patch_data.jsonz"
     elif combined:
@@ -127,11 +129,11 @@ def project_to_fname(project, patches=False, combined=False,
         return prefix + project + "_commits.jsonz"
 
 
-def filter_file(fname, exclude_prefixes, include_suffixes):
-    for prefix in exclude_prefixes:
+def filter_file(fname, filter_config):
+    for prefix in filter_config['exclude_prefix']:
         if fname.startswith(prefix):
             return False
-    for suffix in include_suffixes:
+    for suffix in filter_config['include_suffix']:
         if fname.endswith(suffix):
             return True
     return False
@@ -350,7 +352,7 @@ def parse_msg(msg, patch=False):
 # Basic Commit Processing
 #
 
-def process_commits(repo, commits, max_count=False, excludes=[]):
+def process_commits(repo, commits, filter_config, max_count=False):
     """Extracts all commit from git repo, subject to max_count limit"""
     total_operations = 0
     total_errors = 0
@@ -360,16 +362,19 @@ def process_commits(repo, commits, max_count=False, excludes=[]):
         if cid in commits:
             continue
 
-        try:
+        # try:
+        if True:
             commits[cid] = {'author': convert_to_builtin_type(c.author),
                             'date': c.committed_date,
                             'cid': c.hexsha,
                             'committer': convert_to_builtin_type(c.committer),
                             'msg': c.message.encode('ascii', 'ignore'),
-                            'files': process_commit_files(c, excludes),
-                            'unfiltered_files':
-                                process_commit_files_unfiltered(c),
-                            'parents': [p.hexsha for p in c.parents]}
+                            'parents': [p.hexsha for p in c.parents]
+                            }
+            all_commit_files = process_commit_files_unfiltered(c)
+            commits[cid]['unfiltered_files'] = all_commit_files
+            commits[cid]['files'] = [f for f in all_commit_files
+                                     if filter_file(f, filter_config)]
 
             commits[cid].update(parse_msg(c.message))
             total_operations += 1
@@ -378,9 +383,9 @@ def process_commits(repo, commits, max_count=False, excludes=[]):
             if total_operations % 1000 == 0:
                 print total_operations,
 
-        except Exception:
+        """except Exception:
             print 'x',
-            total_errors += 1
+            total_errors += 1"""
 
     if total_errors > 0:
         print
@@ -388,12 +393,9 @@ def process_commits(repo, commits, max_count=False, excludes=[]):
 
     return commits
 
-# TO DO: rewrite process_commit_files to use results from
-# process_commit_files_unfiltered
 
-
-def process_commit_files(c, excludes=[], filt=FILTER_FILE_SUFFIX):
-    """Determine files associated with an individual commit"""
+"""def deleteme_process_commit_files(c, excludes=[], filt=FILTER_FILE_SUFFIX):
+    "Determine files associated with an individual commit
 
     files = []
 
@@ -426,6 +428,7 @@ def process_commit_files(c, excludes=[], filt=FILTER_FILE_SUFFIX):
                 files.append(d.b_blob.path)
 
     return files
+"""
 
 
 def process_commit_files_unfiltered(c):
@@ -739,13 +742,13 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
 #
 
 
-def build_git_commits(project, repo_name, update=True, include_patch=False):
+def build_git_commits(project, update=True, include_patch=False,
+                      include_loc=False):
     """Top level routine to generate commit data """
 
+    repo_name = get_repo_name(project)
     repo = Repo(repo_name)
     assert repo.bare is False
-
-    exclude_file_prefix = GET_FILE_EXCLUDE_PREFIXES(project)
 
     if update:
         try:
@@ -757,7 +760,7 @@ def build_git_commits(project, repo_name, update=True, include_patch=False):
     if not update:
         commits = collections.defaultdict(list)
 
-    commits = process_commits(repo, commits, excludes=exclude_file_prefix)
+    commits = process_commits(repo, commits, get_filter_config(project))
     print
     print 'total commits:', len(commits)
     if include_patch:
@@ -772,11 +775,10 @@ def build_git_commits(project, repo_name, update=True, include_patch=False):
     print 'Augment Git data with ordering info'
     git_annotate_order(commits, repo_name)
 
-    """
-    print
-    print 'Augment Git data with lines-of-code changed'
-    annotate_commit_loc(commits, repo_name, excludes=exclude_file_prefix)
-    """
+    if include_loc:
+        print
+        print 'Augment Git data with lines-of-code changed'
+        annotate_commit_loc(commits, repo_name, get_filter_config(project))
 
     jdump(commits, project_to_fname(project))
 
@@ -907,8 +909,7 @@ def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
         return [path, False]
 
 
-def process_commit_details(cid, repo, repo_name,
-                           excludes=[], filt=FILTER_FILE_SUFFIX):
+def process_commit_details(cid, repo, repo_name, filter_config):
     """Process individual commit, computing diff and identifying blame.
        Exclude non-source files
     """
@@ -928,8 +929,7 @@ def process_commit_details(cid, repo, repo_name,
                   # for p in c.parents    # iterate through each parent
                   for d in c.diff(p, create_patch=True).iter_change_type('M')
                   if (d.a_blob and d.b_blob
-                      and filter_file(d.b_blob.path.split('.')[-1],
-                                      excludes, filt)
+                      and filter_file(d.b_blob.path, filter_config)
                       and str(d.a_blob) != git.objects.blob.Blob.NULL_HEX_SHA
                       and str(d.b_blob) != git.objects.blob.Blob.NULL_HEX_SHA
                       and d.a_blob.size != 0
@@ -944,7 +944,7 @@ def process_commit_details(cid, repo, repo_name,
     return dict(blame)
 
 
-def compute_all_blame(bug_fix_commits, repo, repo_name, excludes=[],
+def compute_all_blame(bug_fix_commits, repo, repo_name, filter_config,
                       start=0, limit=1000000,
                       keep=set(['lineno', 'orig_lineno', 'commit', 'text'])):
     """Top level iterator for computing diff & blame for a list of commits"""
@@ -954,7 +954,8 @@ def compute_all_blame(bug_fix_commits, repo, repo_name, excludes=[],
     for cid in bug_fix_commits[start:start+limit]:
         all_blame.append(
             {'cid': cid,
-             'blame': process_commit_details(cid, repo, repo_name, excludes)})
+             'blame': process_commit_details(cid, repo,
+                                             repo_name, filter_config)})
 
         progress += 1
         # if progress % 100 == 0:
@@ -1017,17 +1018,17 @@ def filter_bug_fix_commits(v, importance='low+', status='fixed'):
            )
 
 
-def build_all_blame(project, combined_commits, repo_name, update=True,
+def build_all_blame(project, combined_commits, update=True,
                     filt=filter_bug_fix_combined_commits):
     """Top level routine to generate or update blame data
     Parameters:
        project - name of project (used as prefix for all files)
        combined_commits - git-relared data
-       repo_name - location of git repo
        update - determines whether full or incremental rebuild
        filt - function used to idnetify bugs
     """
 
+    repo_name = get_repo_name(project)
     repo = Repo(repo_name)
     exclude_file_prefix = GET_FILE_EXCLUDE_PREFIXES(project)
     bug_fix_commits = set([k for k, v in combined_commits.items()
@@ -1050,7 +1051,7 @@ def build_all_blame(project, combined_commits, repo_name, update=True,
         new_blame = list(bug_fix_commits)
 
     all_blame = compute_all_blame(new_blame, repo, repo_name,
-                                  exclude_file_prefix)
+                                  get_filter_config(project))
     # prune huge entries
     for x in all_blame:
         prune_huge_blame(x)
@@ -1297,8 +1298,7 @@ def git_annotate_order(commits, repo_name):
     git_annotate_file_order_by_author(commits)
 
 
-def annotate_commit_loc(commits, repo_name,
-                        excludes=[], filt=FILTER_FILE_SUFFIX):
+def annotate_commit_loc(commits, repo_name, filter_config):
     """Computes lines of code changed """
 
     repo = git.Repo(repo_name)
@@ -1315,8 +1315,8 @@ def annotate_commit_loc(commits, repo_name,
 
                 # for p in c.parents:    # iterate through each parent
                 for d in c.diff(p, create_patch=True):
-                    if d.a_blob and filter_file(d.a_blob.path.split('.')[-1],
-                                                excludes, filt):
+                    if d.a_blob and filter_file(d.a_blob.path,
+                                                filter_config):
                         fname = d.a_blob.path
                         adds = sum([1 for txt in d.diff.splitlines()
                                     if txt.startswith('+')]) - 1

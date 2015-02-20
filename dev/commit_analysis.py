@@ -5,7 +5,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 2/19/2014
+# Last updated 2/20/2014
 #
 # History:
 # - 9/2/14:  Initial version (initially contained in NovaSampleData).
@@ -26,6 +26,8 @@
 # - 2/9/15 - added autoset_threshold() and helper function
 #            count_guilty_commits().  Added fit_features()
 # - 2/19/15 - New consistency checking routine verify_missing_bugs().
+# - 2/20/15 - updated rebuild_all_analysis_data() to remove repo_name
+#             including api calls to build_git_commits(), build_all_blame()
 #
 # Top Level Routines:
 #    from commit_analysis import blame_compute_normalized_guilt
@@ -63,6 +65,8 @@ from GerritDownload import load_gerrit_changes, load_gerrit_change_details
 from Git_Extract_Join import build_git_commits, load_git_commits
 from Git_Extract_Join import build_joined_LP_Gerrit_git, load_combined_commits
 from Git_Extract_Join import build_all_blame, load_all_blame
+
+from git_analysis_config import get_lpcache_dir
 
 
 from Git_Extract_Join import filter_bug_fix_combined_commits
@@ -133,9 +137,9 @@ def load_all_analysis_data(project):
         commits, combined_commits, all_blame
 
 
-def rebuild_all_analysis_data(project, repo_name, update=True):
+def rebuild_all_analysis_data(project, update=True):
     """Rebuilds core datasets"""
-    cachedir = './cache/' + project + '/'
+    cachedir = get_lpcache_dir(project)
 
     print
     print 'rebuilding Launchpad (bug) data'
@@ -147,7 +151,7 @@ def rebuild_all_analysis_data(project, repo_name, update=True):
 
     print
     print'building Git data'
-    build_git_commits(project, repo_name, update=update)
+    build_git_commits(project, update=update)
 
     print
     print 'Preparation for join'
@@ -167,7 +171,7 @@ def rebuild_all_analysis_data(project, repo_name, update=True):
     print
     print 'Building all blame'
     combined_commits = load_combined_commits(project)
-    build_all_blame(project, combined_commits, repo_name, update=update)
+    build_all_blame(project, combined_commits, update=update)
 
 #
 # Routines for post-processing Dataset
