@@ -6,7 +6,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 2/19/2015
+# Last updated 2/20/2015
 #
 # History:
 # - 9/1/2014:  Converted from iPython notebook, added callable interfaces
@@ -20,6 +20,8 @@
 # - 2/19/2015: Extended lp_parse_messages to identify commits prefixed by
 #              https://git.openstack.org/cgit/openstack/glance/commit/?id=
 # - 2/19/2015:  Support directed updated in build
+# - 2/20/2015: Updated project_to_fname() to use config data. Removed parameter
+#              cachedir from build_lp_bugs() api.
 #
 # Top Level Routines:
 #    from LPBugsDownload import build_lp_bugs, load_lp_bugs
@@ -35,6 +37,7 @@ import httplib2
 import os
 
 from jp_load_dump import pdump, pload, jdump, jload
+from git_analysis_config import get_corpus_dir, get_lpcache_dir
 
 #
 # Globals
@@ -102,8 +105,9 @@ lp_excludes = {'https://api.launchpad.net/1.0/#bug':
 #
 
 
-def project_to_fname(project, prefix='./Corpus/'):
+def project_to_fname(project):
     """Helper routine to create standard filename from project name"""
+    prefix = get_corpus_dir(project)
     return prefix+project + "_lp_bugs.jsonz"
 
 
@@ -304,17 +308,20 @@ def annotate_bug_status(bugs, project):
 # Top Level Routines
 #
 
-def build_lp_bugs(project, update=True, limit=-1, cachedir=''):
+def build_lp_bugs(project, update=True, limit=-1):
     """Top level routine to download bug related data from Launchpad
 
     Update determines whether incremental update is used.  True = incremental
     Special case with update is list, then specific list of bugno's are
     fetched
     """
+
     global ALL_BUGS
     ALL_BUGS = {}
     global lp
-    lp = Launchpad.login_anonymously('just testing', 'production', cachedir)
+
+    lp = Launchpad.login_anonymously('just testing', 'production',
+                                     get_lpcache_dir(project))
     existing_file = False
 
     pname = project_to_fname(project)

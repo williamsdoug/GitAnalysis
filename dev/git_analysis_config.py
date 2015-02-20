@@ -11,12 +11,14 @@
 # - 2/20/15: Initial version.  Includes configuration data for file filtering,
 #            git repo, lp cache and corpus.  New routines get_filter_config(),
 #            get_corpus_dir(), get_repo_dir(), get_lpcache_dir()
+# - 2/20/15: Added Gerrit config data
 #
 # Top Level Routines:
 #    from git_analysis_config import get_filter_config
 #    from git_analysis_config import get_corpus_dir
 #    from git_analysis_config import get_repo_name
 #    from git_analysis_config import get_lpcache_dir
+#    from git_analysis_config import get_gerrit_url, get_gerrit_query_base
 #
 
 DEFAULT_REPO_PATH = '/Users/doug/SW_Dev/'
@@ -27,7 +29,8 @@ DEFAULT_LPCACHE_PATH = DEFAULT_WORKING_DIRECTORY + '/cache/'
 DEFAULT_FILTER_INCLUDE_FILE_SUFFIX = ['.py', '.sh', '.js', '.c', '.go', '.sh']
 DEFAULT_FILTER_EXCLUDE_FILE_PREFIX = ['tools/']
 
-['' + '/tests/', 'tools/']
+OPENSTACK_GERRIT_URL = 'http://review.openstack.org'
+OPENSTACK_GERRIT_QUERY_PREFIX = "/changes/?q=project:{openstack/"
 
 PROJECT_CONFIG = {
     'nova': {'git_repo': DEFAULT_REPO_PATH + 'nova',
@@ -35,6 +38,8 @@ PROJECT_CONFIG = {
              'corpus_location': DEFAULT_CORPUS_PATH,
              'file_include_suffix': DEFAULT_FILTER_INCLUDE_FILE_SUFFIX,
              'file_exclude_prefix': ['nova/tests/', 'tools/'],
+             'gerrit_url': OPENSTACK_GERRIT_URL,
+             'gerrit_query': OPENSTACK_GERRIT_QUERY_PREFIX + 'nova' + '}',
              'toolchain': ['launchpad', 'gerrit', 'git'],
              'toolchain_configuration': 'OpenStack',
              },
@@ -42,6 +47,8 @@ PROJECT_CONFIG = {
               'lp_cache': DEFAULT_LPCACHE_PATH + 'swift' + '/',
               'corpus_location': DEFAULT_CORPUS_PATH,
               'file_include_suffix': DEFAULT_FILTER_INCLUDE_FILE_SUFFIX,
+              'gerrit_url': OPENSTACK_GERRIT_URL,
+              'gerrit_query': OPENSTACK_GERRIT_QUERY_PREFIX + 'swift' + '}',
               'file_exclude_prefix': ['swift/tests/', 'tools/'],
               'toolchain': ['launchpad', 'gerrit', 'git'],
               'toolchain_configuration': 'OpenStack',
@@ -51,6 +58,8 @@ PROJECT_CONFIG = {
                'corpus_location': DEFAULT_CORPUS_PATH,
                'file_include_suffix': DEFAULT_FILTER_INCLUDE_FILE_SUFFIX,
                'file_exclude_prefix': ['cinder/tests/', 'tools/'],
+               'gerrit_url': OPENSTACK_GERRIT_URL,
+               'gerrit_query': OPENSTACK_GERRIT_QUERY_PREFIX + 'cinder' + '}',
                'toolchain': ['launchpad', 'gerrit', 'git'],
                'toolchain_configuration': 'OpenStack',
                },
@@ -59,6 +68,8 @@ PROJECT_CONFIG = {
              'corpus_location': DEFAULT_CORPUS_PATH,
              'file_include_suffix': DEFAULT_FILTER_INCLUDE_FILE_SUFFIX,
              'file_exclude_prefix': ['heat/tests/', 'tools/'],
+             'gerrit_url': OPENSTACK_GERRIT_URL,
+             'gerrit_query': OPENSTACK_GERRIT_QUERY_PREFIX + 'heat' + '}',
              'toolchain': ['launchpad', 'gerrit', 'git'],
              'toolchain_configuration': 'OpenStack',
              },
@@ -67,6 +78,8 @@ PROJECT_CONFIG = {
                'corpus_location': DEFAULT_CORPUS_PATH,
                'file_include_suffix': DEFAULT_FILTER_INCLUDE_FILE_SUFFIX,
                'file_exclude_prefix': ['glance/tests/', 'tools/'],
+               'gerrit_url': OPENSTACK_GERRIT_URL,
+               'gerrit_query': OPENSTACK_GERRIT_QUERY_PREFIX + 'glance' + '}',
                'toolchain': ['launchpad', 'gerrit', 'git'],
                'toolchain_configuration': 'OpenStack',
                },
@@ -110,3 +123,18 @@ def get_lpcache_dir(project):
         raise Exception('get_lpcache_dir: unknown project config ' + project)
     else:
         return PROJECT_CONFIG[project]['lp_cache']
+
+
+def get_gerrit_url(project):
+    if project not in PROJECT_CONFIG:
+        raise Exception('get_gerrit_url: unknown project config ' + project)
+    else:
+        return PROJECT_CONFIG[project]['gerrit_url']
+
+
+def get_gerrit_query_base(project):
+    if project not in PROJECT_CONFIG:
+        raise Exception('get_gerrit_query_base: unknown project config '
+                        + project)
+    else:
+        return PROJECT_CONFIG[project]['gerrit_query']

@@ -27,7 +27,8 @@
 #            count_guilty_commits().  Added fit_features()
 # - 2/19/15 - New consistency checking routine verify_missing_bugs().
 # - 2/20/15 - updated rebuild_all_analysis_data() to remove repo_name
-#             including api calls to build_git_commits(), build_all_blame()
+#             including api calls to build_git_commits(), build_all_blame().
+#             also remove cachedir from calls to build_lp_bugs()
 #
 # Top Level Routines:
 #    from commit_analysis import blame_compute_normalized_guilt
@@ -66,8 +67,6 @@ from Git_Extract_Join import build_git_commits, load_git_commits
 from Git_Extract_Join import build_joined_LP_Gerrit_git, load_combined_commits
 from Git_Extract_Join import build_all_blame, load_all_blame
 
-from git_analysis_config import get_lpcache_dir
-
 
 from Git_Extract_Join import filter_bug_fix_combined_commits
 
@@ -79,14 +78,14 @@ from Git_Extract_Join import filter_bug_fix_combined_commits
 # Routines to consistency check Git, Gerrit and Lanuchpad Data
 #
 
-def verify_missing_bugs(commits, all_bugs, project, cachedir):
+def verify_missing_bugs(commits, all_bugs, project):
     all_bugs_in_commits = set([b for c in commits.values()
                                if 'bugs' in c for b in c['bugs']])
     known_bugs = set(all_bugs.keys())
 
     missing_bugs = all_bugs_in_commits.difference(known_bugs)
     if len(missing_bugs) > 0:
-        build_lp_bugs(PROJECT, update=missing_bugs, cachedir=cachedir)
+        build_lp_bugs(PROJECT, update=missing_bugs)
         return load_lp_bugs(project)
     else:
         print 'no missing bugs'
@@ -139,11 +138,10 @@ def load_all_analysis_data(project):
 
 def rebuild_all_analysis_data(project, update=True):
     """Rebuilds core datasets"""
-    cachedir = get_lpcache_dir(project)
 
     print
     print 'rebuilding Launchpad (bug) data'
-    build_lp_bugs(project, update=update, cachedir=cachedir)
+    build_lp_bugs(project, update=update)
 
     print
     print 'rebuilding Gerrit data'
@@ -162,7 +160,7 @@ def rebuild_all_analysis_data(project, update=True):
     print
     print 'Load any missing bugs'
     downloaded_bugs = verify_missing_bugs(commits, downloaded_bugs,
-                                          project, cachedir)
+                                          project)
     print
     print 'Building combined_commits'
     build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,

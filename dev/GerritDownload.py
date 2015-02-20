@@ -6,7 +6,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 1/25/2015
+# Last updated 2/20/2015
 #
 # History:
 # - 9/1/14: Converted from iPython notebook, added callable interfaces
@@ -14,6 +14,8 @@
 # - 1/25/15: PEP-8 clean-up
 # - 2/4/2015: fix hard coding of 'nova' in build_all_change_details()
 # - 2/5/2015: clean-up additional harc coding of project name
+# - 2/20/2015: Updated project_to_fname() and get_all_changes()
+#              to use config data.
 #
 # Top Level Routines:
 #    from GerritDownload import build_gerrit_data
@@ -26,6 +28,8 @@ from pygerrit.rest import GerritRestAPI
 import time
 
 from jp_load_dump import pdump, pload, jdump, jload
+from git_analysis_config import get_corpus_dir
+from git_analysis_config import get_gerrit_url, get_gerrit_query_base
 
 #
 # Background Information:
@@ -42,15 +46,18 @@ from jp_load_dump import pdump, pload, jdump, jload
 #
 # Globals
 #
-rest = GerritRestAPI(url='http://review.openstack.org')
+
+global REST
+REST = False   # will be initialized in build_gerrit_data
 
 #
 # Code
 #
 
 
-def project_to_fname(project, prefix='./Corpus/', details=False):
+def project_to_fname(project, details=False):
     """Helper function - converts project name to standardized file names """
+    prefix = get_corpus_dir(project)
     if details:
         return prefix + project + "_change_details.jsonz"
     else:
@@ -59,28 +66,28 @@ def project_to_fname(project, prefix='./Corpus/', details=False):
 
 def get_version():
     """Gets REST API version - not currently used """
-    global rest
-    proj = rest.get("/config/server/version")
+    global REST
+    proj = REST.get("/config/server/version")
 
 
 def get_projects(filter='openstack/'):
     """Gets list of projects from Gerrit - not currently used """
-    global rest
-    proj = rest.get("/projects/?")
+    global REST
+    proj = REST.get("/projects/?")
     if filter:
         return [x for x in proj.keys() if filter in x]
     else:
         return proj.keys()
 
 
-def get_all_changes(project, prefix='openstack/', limit=1000000000):
+def get_all_changes(project, limit=1000000000):
     """Gets list of changes for a project """
-    global rest
+    global REST
     result = []
     total = 0
     sortkey = ''
     count = 1
-    query = "/changes/?q=project:{" + prefix + project + "}+is:merged"
+    query = get_gerrit_query_base(project) + "+is:merged"
 
     while count > 0 and total < limit:
         if sortkey:
@@ -89,7 +96,7 @@ def get_all_changes(project, prefix='openstack/', limit=1000000000):
             suffix = ''
 
         # print query+suffix
-        changes = rest.get(query+suffix)
+        changes = REST.get(query+suffix)
 
         count = len(changes)
         if count > 0:
@@ -106,9 +113,9 @@ def get_all_changes(project, prefix='openstack/', limit=1000000000):
 
 def get_change(changeno):
     """Gets summary change data """
-    global rest
+    global REST
     query = "/changes/" + str(changeno)
-    return rest.get(query)
+    return REST.get(query)
 
 
 def compress_vote_set(d):
@@ -151,9 +158,9 @@ def compress_messages(messages):
 
 def get_change_detail(changeno, _prune=True):
     """Get full detail for a change """
-    global rest
+    global REST
     query = "/changes/" + str(changeno) + '/detail'
-    x = rest.get(query)
+    x = REST.get(query)
 
     if _prune:
         x = prune(x)
@@ -216,6 +223,8 @@ def load_gerrit_change_details(project):
 
 def build_all_changes(project, update=False):
     """Top level routine to download summary change data """
+    global REST
+    REST = GerritRestAPI(url=get_gerrit_url(project))
     all_changes = get_all_changes(project)
     print len(all_changes)
     name = project_to_fname(project)
@@ -227,6 +236,8 @@ def build_all_change_details(project, update=False):
     """Top level routine to download detailed change data.
         Supports incremental updates.
     """
+    global REST
+    REST = GerritRestAPI(url=get_gerrit_url(project))
     if update:
         all_changes = load_gerrit_changes(project)
         print 'all_changes:', len(all_changes)
