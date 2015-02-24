@@ -29,6 +29,9 @@
 # - 2/20/15 - updated rebuild_all_analysis_data() to remove repo_name
 #             including api calls to build_git_commits(), build_all_blame().
 #             also remove cachedir from calls to build_lp_bugs()
+# - 2/23/15 - New join code - join_all()
+# - 2/24/15 - Integrated join into rebuild_all_analysis_data
+
 #
 # Top Level Routines:
 #    from commit_analysis import blame_compute_normalized_guilt
@@ -49,7 +52,7 @@
 
 
 # import numpy as np
-from collections import defaultdict
+import collections
 import re
 import math
 import numpy as np
@@ -63,12 +66,12 @@ from LPBugsDownload import build_lp_bugs, load_lp_bugs
 from GerritDownload import build_gerrit_data
 from GerritDownload import load_gerrit_changes, load_gerrit_change_details
 
-from Git_Extract_Join import build_git_commits, load_git_commits
-from Git_Extract_Join import build_joined_LP_Gerrit_git, load_combined_commits
-from Git_Extract_Join import build_all_blame, load_all_blame
+from Git_Extract import build_git_commits, load_git_commits
+from Git_Extract import build_all_blame, load_all_blame
+from Git_Extract import filter_bug_fix_combined_commits
+from Git_Extract import project_to_fname
+from jp_load_dump import convert_to_builtin_type, jload, jdump
 
-
-from Git_Extract_Join import filter_bug_fix_combined_commits
 
 # import sys
 # from jp_load_dump import jload
@@ -152,7 +155,10 @@ def rebuild_all_analysis_data(project, update=True):
     build_git_commits(project, update=update)
 
     print
-    print 'Preparation for join'
+    print 'Build combined_commits by joinin with bugs and gerrit data'
+    combined_commits = join_all(project)
+
+    """
     downloaded_bugs = load_lp_bugs(project)
     commits = load_git_commits(project)
     all_change_details = load_gerrit_change_details(project)
@@ -165,11 +171,97 @@ def rebuild_all_analysis_data(project, update=True):
     print 'Building combined_commits'
     build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,
                                all_change_details)
+    """
 
     print
     print 'Building all blame'
     combined_commits = load_combined_commits(project)
-    build_all_blame(project, combined_commits, update=update)
+    # build_all_blame(project, combined_commits, update=update)
+
+#
+# Join related routines
+#
+
+
+def load_combined_commits(project):
+    """Loads combined_commit data from disk"""
+    return jload(project_to_fname(project, combined=True))
+
+
+def join_all(project):
+    """Top level join routine"""
+    all_bugs = load_lp_bugs(project)
+    commits = load_git_commits(project, prune=False)
+    all_changes = load_gerrit_changes(project)
+    all_change_details = load_gerrit_change_details(project)
+
+    # get any missing bugs
+    print
+    print 'Load any missing bugs, if needed'
+    all_bugs = verify_missing_bugs(commits, all_bugs, project)
+
+    # clone commits
+    combined = dict([[k, v.copy()] for k, v in commits.items()])
+
+    # include Launchpad bug details information
+    print 'Joining with Launchpad Data'
+    combined = join_with_bugs(combined, all_bugs)
+
+    # include Gerrit review details
+    print 'Joining with Gerrit Data'
+    combined = join_with_gerrit(project, combined,
+                                all_changes, all_change_details)
+
+    jdump(combined, project_to_fname(project, combined=True))
+    return combined
+
+
+def join_with_bugs(commits, all_bugs):
+    """Joins Launchpad Data with corresponding commits"""
+    idx_bugno_by_cid = collections.defaultdict(list)
+    for b in all_bugs.values():
+        for e in b['commits']:
+            idx_bugno_by_cid[e['cid']].append(b['id'])
+
+    for cid, c in commits.items():
+        c['bug_details'] = {}
+        if 'all_bugs' in c:                # Join on bug number
+            for bugno in c['all_bugs']:
+                if bugno in all_bugs:
+                    c['bug_details'][bugno] = all_bugs[bugno]
+        if cid in idx_bugno_by_cid:  # Join on commit id
+            for bugno in idx_bugno_by_cid[cid]:
+                if bugno not in c['bug_details']:
+                    c['bug_details'][bugno] = all_bugs[bugno]
+    return commits
+
+
+def join_with_gerrit(project, commits, all_changes, all_change_details):
+    """Joins Gerrit data with corresponding commits"""
+    # Index gerrit changes, pruning away changes off master branch
+    change_by_changeid = dict([[c['change_id'], c]
+                               for c in all_changes
+                               if c['branch'] == 'master'
+                               and c['project'].endswith(project)
+                               and c['status'] == 'MERGED'])
+
+    change__details_by_changeid = dict([[c['change_id'], c]
+                                        for c in all_change_details
+                                        if c['branch'] == 'master'
+                                        and c['project'].endswith(project)
+                                        and c['status'] == 'MERGED'])
+
+    for cid, c in commits.items():
+        c['change_details'] = []
+        if 'all_changes' in c:                # Join on chage_id
+            for change_id in c['all_changes']:
+                if (change_id in change_by_changeid
+                        and change_id in change__details_by_changeid):
+                    change = change_by_changeid[change_id]
+                    change.update(change__details_by_changeid[change_id])
+                    c['change_details'].append(change)
+    return commits
+
 
 #
 # Routines for post-processing Dataset

@@ -4,9 +4,9 @@
 #
 # Author:  Doug Williams - Copyright 2014, 2015
 #
-# Currently configured for OpenStack, tested with Nova and Swift.
+# Currently being tested using OpenStack (Nova, Swift, Glance, Cinder, Heat)
 #
-# Last updated 2/3/2014
+# Last updated 2/20/2014
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -72,16 +72,25 @@
 #             process_commits(), process_commit_details() and
 #             annotate_commit_loc().  Removed process_commit_files()
 # - 2/20/15 - project_to_fname() leverages configuration data.
+# - 2/20/15 - Downloads all commits in repo.  Commits in Master branch
+#             tagged as ['on_master_branch'].  Commits on primary merge
+#             path tagged as ['on_mainline'].  Distance now mreasured as
+#             in c['distance_from_mainline']. ['is_master'] tag now
+#             ['is_master_commit']
+# - 2/20/15 - Consistently store c['change_id'] as list to simplify
+#             post-processing
+# - 2/24/15 - Join code now in commit_analysis (also re-written).
+# - 2/24/15 - Renamed this file Git_Extract.py (was Git_Extract_Join.py).
 #
 # Top Level Routines:
-#    from Git_Extract_Join import build_git_commits, load_git_commits
-#    from Git_Extract_Join import build_joined_LP_Gerrit_git,
-#    from Git_Extract_Join import load_combined_commits
-#    from Git_Extract_Join import build_all_blame, load_all_blame
+#    from Git_Extract import build_git_commits, load_git_commits
+# delete   from Git_Extract_Join import build_joined_LP_Gerrit_git,
+# delete   from Git_Extract_Join import load_combined_commits
+#    from Git_Extract import build_all_blame, load_all_blame
 #
-#    from Git_Extract_Join import get_git_master_commit, get_authors_and_files
-#    from Git_Extract_Join import filter_bug_fix_commits
-#    from Git_Extract_Join import  filter_bug_fix_combined_commits
+#    from Git_Extract import get_git_master_commit, get_authors_and_files
+#    from Git_Extract import filter_bug_fix_commits
+#    from Git_Extract import  filter_bug_fix_combined_commits
 #
 
 from git import *
@@ -90,11 +99,7 @@ import time
 import pprint as pp
 import collections
 from collections import defaultdict
-# import cPickle as pickle
-# import os
 import re
-# import gzip
-# import json
 import urllib2
 
 from jp_load_dump import convert_to_builtin_type, pload, pdump, jload, jdump
@@ -109,7 +114,7 @@ from git_analysis_config import get_repo_name, get_corpus_dir
 # Configuration Variables
 #
 
-INSANELY_HUGE_MASTER_BRANCH_DISTANCE = 1000000000
+INSANELY_HUGE_BRANCH_DISTANCE = 1000000000
 
 
 #
@@ -160,12 +165,7 @@ def parse_all_changes(msg):
             result.append(m.group(1))
 
     result = list(set(result))  # dedupe
-    if len(result) > 1:
-        return result
-    elif len(result) == 1:
-        return result[0]
-    else:
-        return False
+    return result
 
 """
 
@@ -298,17 +298,6 @@ def test_parse_bugs():
             print bugs, test
 
 
-# Legacy, delete once new join code complete
-def old_parse_bug(txt):
-    """Extracts bug id """
-    txt = txt.lower()
-    m = bug_template.search(txt)
-    if m:
-        return {'bug': m.group(1)}
-    else:
-        return {}
-
-
 def parse_msg(msg, patch=False):
     """
     Overall routine for processing commit messages, also used for patch msgs
@@ -328,11 +317,6 @@ def parse_msg(msg, patch=False):
     if patch:
         for line in msg.split('\n'):
             lline = line.lower()
-            # if 'bug' in yy or 'change' in yy:
-            # if 'change' in lline:
-            #     result.update(parse_change(line))
-            # if 'bug' in lline:
-            #    result.update(old_parse_bug(line))
             if line.startswith('From: '):
                 try:
                     result['pAuth'] = '<git.Actor "'
@@ -357,13 +341,14 @@ def process_commits(repo, commits, filter_config, max_count=False):
     total_operations = 0
     total_errors = 0
 
-    for c in repo.iter_commits('master', max_count=max_count):
-        cid = c.hexsha
-        if cid in commits:
-            continue
+    for h in repo.heads:
+        for c in repo.iter_commits(h):
+            # for c in repo.iter_commits('master', max_count=max_count):
+            cid = c.hexsha
+            if cid in commits:
+                continue
 
-        # try:
-        if True:
+            # try:
             commits[cid] = {'author': convert_to_builtin_type(c.author),
                             'date': c.committed_date,
                             'cid': c.hexsha,
@@ -383,52 +368,25 @@ def process_commits(repo, commits, filter_config, max_count=False):
             if total_operations % 1000 == 0:
                 print total_operations,
 
-        """except Exception:
-            print 'x',
-            total_errors += 1"""
+            """except Exception:
+                print 'x',
+                total_errors += 1"""
 
     if total_errors > 0:
         print
         print 'Commits skipped due to error:', total_errors
 
+    # Now identify those commits within Master branch
+    print
+    print 'Annotating Master Branch'
+    for cid in commits.keys():
+        commits[cid]['on_master_branch'] = False
+    for c in repo.iter_commits('master'):
+            cid = c.hexsha
+            if cid in commits:
+                commits[cid]['on_master_branch'] = True
+
     return commits
-
-
-"""def deleteme_process_commit_files(c, excludes=[], filt=FILTER_FILE_SUFFIX):
-    "Determine files associated with an individual commit
-
-    files = []
-
-    # for p in c.parents:    # iterate through each parent
-    if len(c.parents) > 0:
-        p = c.parents[0]
-        i = c.diff(p, create_patch=False)
-
-        for d in i.iter_change_type('A'):
-            if d.b_blob and filter_file(d.b_blob.path.split('.')[-1],
-                                        excludes, filt):
-                files.append(d.b_blob.path)
-
-        for d in i.iter_change_type('D'):
-            if d.a_blob and filter_file(d.a_blob.path.split('.')[-1],
-                                        excludes, filt):
-                files.append(d.a_blob.path)
-
-        for d in i.iter_change_type('R'):
-            if d.a_blob and filter_file(d.a_blob.path.split('.')[-1],
-                                        excludes, filt):
-                files.append(d.a_blob.path)
-            if d.b_blob and filter_file(d.b_blob.path.split('.')[-1],
-                                        excludes, filt):
-                files.append(d.b_blob.path)
-
-        for d in i.iter_change_type('M'):
-            if d.b_blob and filter_file(d.b_blob.path.split('.')[-1],
-                                        excludes, filt):
-                files.append(d.b_blob.path)
-
-    return files
-"""
 
 
 def process_commit_files_unfiltered(c):
@@ -573,6 +531,7 @@ def is_special_committer(commit,
 def is_merge_commit(commit, include_special_actor=False):
     """Identifies non-fastforward Git Merge commits"""
     if not (commit['on_master_branch']
+            and commit['on_mainline']
             and len(commit['parents']) >= 2):
         return False
     if include_special_actor:
@@ -605,29 +564,29 @@ def combine_merge_commit(c, commits):
     # c['parents'] = c['parents'][0:1]
 
 
-def annotate_master_branch(commits, master_commit):
-    """Master branch is considered as lineage from Master
+def annotate_mainline(commits, master_commit):
+    """Master branch mainline is considered as lineage from Master
     commit by following first parent
     """
     # Reset branch-related values
     for v in commits.values():
-        v['on_master_branch'] = False
-        v['master_branch_distance'] = INSANELY_HUGE_MASTER_BRANCH_DISTANCE
-        v['is_master'] = False
+        v['on_mainline'] = False
+        v['distance_from_mainline'] = INSANELY_HUGE_BRANCH_DISTANCE
+        v['is_master_commit'] = False
         v['ancestors'] = False
         v['tombstone'] = False
         v['merge_commit'] = False
 
-    commits[master_commit]['is_master'] = True
-    commits[master_commit]['master_branch_distance'] = 0
+    commits[master_commit]['is_master_commit'] = True
+    commits[master_commit]['distance_from_mainline'] = 0
     current = master_commit
     runaway = 10000
 
     while current and runaway > 0:
         runaway -= 1
         c = commits[current]
-        c['on_master_branch'] = True
-        c['master_branch_distance'] = 0
+        c['on_mainline'] = True
+        c['distance_from_mainline'] = 0
         if c['parents']:
             current = c['parents'][0]
         else:
@@ -639,13 +598,13 @@ def annotate_master_branch(commits, master_commit):
 def aggregate_merge_bugs_and_changes(commits):
     """Associates bugs and changes with each merge commit"""
     for k, c in commits.items():  # Initialize
-        if c['on_master_branch']:
+        if c['on_mainline']:
             commits[k]['all_bugs'] = []
             commits[k]['all_changes'] = []
             commits[k]['children'] = []
 
     for k, c in commits.items():  # Accumulate bugs and changes for children
-        if not c['on_master_branch']:
+        if c['on_master_branch'] and not c['on_mainline']:
             a = c['ancestors'][0]
             if not a:
                 continue
@@ -663,7 +622,7 @@ def aggregate_merge_bugs_and_changes(commits):
                     commits[a]['all_changes'].append(c['change_id'])
 
     for k, c in commits.items():  # Dedupe results
-        if c['on_master_branch']:
+        if c['on_mainline']:
             commits[k]['all_bugs'] = list(set(commits[k]['all_bugs']))
             commits[k]['all_changes'] = list(set(commits[k]['all_changes']))
     return commits
@@ -677,9 +636,9 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
       - Including garbage collection for parents of parents ...
     - Established overall commit ordering
     """
-    # Annotate master branch
+    # Annotate mainline within master branch
     print 'Master Commit:', master_commit
-    commits = annotate_master_branch(commits, master_commit)
+    commits = annotate_mainline(commits, master_commit)
 
     # sanity-check merges (relative to master branch')
     # check_merge_stats(commits, verbose=verbose)
@@ -700,7 +659,7 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
         print 'initial commmits to be pruned:', len(prune)
         print 'starting commits:', len(commits)
 
-    # prune commits and any predicessor commits no on master branch
+    # prune commits and any predecessor commits no on master branch
     runaway = 100000
     while prune and runaway > 0:
         runaway -= 1
@@ -712,13 +671,18 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
 
         for p in c['parents']:
             if (p in commits and commits[p]
-               and not commits[p]['on_master_branch']):
+               and not commits[p]['on_mainline']):
                 prune.append([p, ancestors + [cid]])
         commits[cid]['tombstone'] = True
         this_branch_distance = len(ancestors)
-        if this_branch_distance < commits[cid]['master_branch_distance']:
+        if this_branch_distance < commits[cid]['distance_from_mainline']:
             commits[cid]['ancestors'] = ancestors
-            commits[cid]['master_branch_distance'] = this_branch_distance
+            commits[cid]['distance_from_mainline'] = this_branch_distance
+
+    # Prune anything outside of Master Branch
+    for c in commits.values():
+        if not c['on_master_branch']:
+            c['tombstone'] = True
 
     # order commits based on timestamp
     commit_order = [[c['cid'], c['date']] for c in commits.values()
@@ -1169,8 +1133,8 @@ def update_commits_with_patch_data(commits, project):
 #             joins LP Bugs & Gerrit with Commit data
 #
 
-def build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,
-                               all_change_details):
+def deleteme_build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,
+                                        all_change_details):
     """Top level routine to compute combined_commits by joining bugs & Gerrit
        data with commit entries.
     """
@@ -1230,7 +1194,7 @@ def build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,
     jdump(results, project_to_fname(project, combined=True))
 
 
-def load_combined_commits(project):
+def deleteme_load_combined_commits(project):
     """Loads combined_commit data from disk"""
     return jload(project_to_fname(project, combined=True))
 
