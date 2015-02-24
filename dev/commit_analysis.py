@@ -81,7 +81,13 @@ from jp_load_dump import convert_to_builtin_type, jload, jdump
 # Routines to consistency check Git, Gerrit and Lanuchpad Data
 #
 
-def verify_missing_bugs(commits, all_bugs, project):
+def verify_missing_bugs(project):
+    """Make sure all bugs references in commits have been downloaded,
+    if not, attempt to load these bugs"""
+
+    all_bugs = load_lp_bugs(project)
+    commits = load_git_commits(project, prune=False)
+
     all_bugs_in_commits = set([b for c in commits.values()
                                if 'bugs' in c for b in c['bugs']])
     known_bugs = set(all_bugs.keys())
@@ -89,10 +95,8 @@ def verify_missing_bugs(commits, all_bugs, project):
     missing_bugs = all_bugs_in_commits.difference(known_bugs)
     if len(missing_bugs) > 0:
         build_lp_bugs(PROJECT, update=missing_bugs)
-        return load_lp_bugs(project)
     else:
         print 'no missing bugs'
-        return all_bugs
 
 #
 # Top level routines to load and update analysis data
@@ -139,39 +143,29 @@ def load_all_analysis_data(project):
         commits, combined_commits, all_blame
 
 
-def rebuild_all_analysis_data(project, update=True):
+def rebuild_all_analysis_data(project, update=True, download=True):
     """Rebuilds core datasets"""
 
-    print
-    print 'rebuilding Launchpad (bug) data'
-    build_lp_bugs(project, update=update)
+    if download:
+        print
+        print 'rebuilding Launchpad (bug) data'
+        build_lp_bugs(project, update=update)
+
+        print
+        print 'rebuilding Gerrit data'
+        build_gerrit_data(project, update=update)
+
+        print
+        print 'building Git data'
+        build_git_commits(project, update=update)
+
+        print
+        print 'Load any missing bugs, if needed'
+        verify_missing_bugs(project)
 
     print
-    print 'rebuilding Gerrit data'
-    build_gerrit_data(project, update=update)
-
-    print
-    print'building Git data'
-    build_git_commits(project, update=update)
-
-    print
-    print 'Build combined_commits by joinin with bugs and gerrit data'
+    print 'Build combined_commits by joining with bugs and gerrit data'
     combined_commits = join_all(project)
-
-    """
-    downloaded_bugs = load_lp_bugs(project)
-    commits = load_git_commits(project)
-    all_change_details = load_gerrit_change_details(project)
-
-    print
-    print 'Load any missing bugs'
-    downloaded_bugs = verify_missing_bugs(commits, downloaded_bugs,
-                                          project)
-    print
-    print 'Building combined_commits'
-    build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,
-                               all_change_details)
-    """
 
     print
     print 'Building all blame'
@@ -194,11 +188,6 @@ def join_all(project):
     commits = load_git_commits(project, prune=False)
     all_changes = load_gerrit_changes(project)
     all_change_details = load_gerrit_change_details(project)
-
-    # get any missing bugs
-    print
-    print 'Load any missing bugs, if needed'
-    all_bugs = verify_missing_bugs(commits, all_bugs, project)
 
     # clone commits
     combined = dict([[k, v.copy()] for k, v in commits.items()])
@@ -225,8 +214,8 @@ def join_with_bugs(commits, all_bugs):
 
     for cid, c in commits.items():
         c['bug_details'] = {}
-        if 'all_bugs' in c:                # Join on bug number
-            for bugno in c['all_bugs']:
+        if 'bugs' in c:                # Join on bug number
+            for bugno in c['bugs']:
                 if bugno in all_bugs:
                     c['bug_details'][bugno] = all_bugs[bugno]
         if cid in idx_bugno_by_cid:  # Join on commit id
@@ -245,20 +234,20 @@ def join_with_gerrit(project, commits, all_changes, all_change_details):
                                and c['project'].endswith(project)
                                and c['status'] == 'MERGED'])
 
-    change__details_by_changeid = dict([[c['change_id'], c]
-                                        for c in all_change_details
-                                        if c['branch'] == 'master'
-                                        and c['project'].endswith(project)
-                                        and c['status'] == 'MERGED'])
+    change_details_by_changeid = dict([[c['change_id'], c]
+                                       for c in all_change_details
+                                       if c['branch'] == 'master'
+                                       and c['project'].endswith(project)
+                                       and c['status'] == 'MERGED'])
 
     for cid, c in commits.items():
         c['change_details'] = []
-        if 'all_changes' in c:                # Join on chage_id
-            for change_id in c['all_changes']:
+        if 'change_id' in c:                # Join on chage_id
+            for change_id in c['change_id']:
                 if (change_id in change_by_changeid
-                        and change_id in change__details_by_changeid):
+                        and change_id in change_details_by_changeid):
                     change = change_by_changeid[change_id]
-                    change.update(change__details_by_changeid[change_id])
+                    change.update(change_details_by_changeid[change_id])
                     c['change_details'].append(change)
     return commits
 
