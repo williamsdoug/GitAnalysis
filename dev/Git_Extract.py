@@ -84,8 +84,6 @@
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
-# delete   from Git_Extract_Join import build_joined_LP_Gerrit_git,
-# delete   from Git_Extract_Join import load_combined_commits
 #    from Git_Extract import build_all_blame, load_all_blame
 #
 #    from Git_Extract import get_git_master_commit, get_authors_and_files
@@ -1127,76 +1125,6 @@ def update_commits_with_patch_data(commits, project):
 
     return commits
 
-
-#
-# Join Code - produces combined_commits
-#             joins LP Bugs & Gerrit with Commit data
-#
-
-def deleteme_build_joined_LP_Gerrit_git(project, commits, downloaded_bugs,
-                                        all_change_details):
-    """Top level routine to compute combined_commits by joining bugs & Gerrit
-       data with commit entries.
-    """
-    results = {}
-
-    total = 0
-
-    # create indices
-    idx_cid_to_bugs = dict([[v['cid'], k]
-                            for k, v in downloaded_bugs.items()
-                            if 'cid' in v])
-    # print len(idxcid_to_bugs)
-    idx_changeid_to_bugs = dict([[v['change_id'], k]
-                                 for k, v in downloaded_bugs.items()
-                                 if 'change_id' in v])
-    # print len(idx_changeid_to_bugs)
-
-    # convert gerrit data into dict indexed by change_id
-    d_gerrit_by_changeid = dict([[v['change_id'], v]
-                                 for v in all_change_details
-                                 if 'change_id' in v])
-    print len(d_gerrit_by_changeid)
-
-    for cid, commit in commits.items():
-        lp_val = []
-        gerrit_val = []
-        git_val = [[k, v] for k, v in commit.items()]
-
-        # join with LP data
-        bugno = False
-        if cid in idx_cid_to_bugs:
-            bugno = idx_cid_to_bugs[cid]
-        elif 'bug' in commit and commit['bug'] in downloaded_bugs:
-            bugno = commit['bug']
-        elif ('change_id' in commit
-                and commit['change_id'] in idx_changeid_to_bugs):
-            bugno = idx_changeid_to_bugs[commit['change_id']]
-
-        if bugno:
-            lp_val = [['lp:'+k, v] for k, v in downloaded_bugs[bugno].items()]
-
-        # join gerrit data using change_id
-        if ('change_id' in commit
-                and commit['change_id'] in d_gerrit_by_changeid):
-            gerrit_val = [['g:'+k, v]
-                          for k, v
-                          in d_gerrit_by_changeid[commit['change_id']].items()]
-
-        results[cid] = dict(lp_val+gerrit_val+git_val)
-
-        total += 1
-        if total % 100 == 0:
-            print '.',
-        if total % 1000 == 0:
-            print total,
-
-    jdump(results, project_to_fname(project, combined=True))
-
-
-def deleteme_load_combined_commits(project):
-    """Loads combined_commit data from disk"""
-    return jload(project_to_fname(project, combined=True))
 
 #
 # Routines to annotate commits by order of change
