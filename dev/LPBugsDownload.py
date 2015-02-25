@@ -22,6 +22,7 @@
 # - 2/19/2015:  Support directed updated in build
 # - 2/20/2015: Updated project_to_fname() to use config data. Removed parameter
 #              cachedir from build_lp_bugs() api.
+# - 2/25/2015: Add error handling to fetch_bug()
 #
 # Top Level Routines:
 #    from LPBugsDownload import build_lp_bugs, load_lp_bugs
@@ -175,7 +176,11 @@ def fetch_bug(bugno):
     global ALL_BUGS
     if bugno in ALL_BUGS:
         return
-    bug = lp_fetch_object(lp.bugs[bugno])
+    try:
+        bug = lp_fetch_object(lp.bugs[bugno])
+    except KeyError:
+        print 'fetch_bug: error fetching information for bug ', bugno
+        return
     # now fetch associated messages
     bug['messages'] = [lp_fetch_object(msg) for msg in bug['messages']]
 

@@ -94,7 +94,7 @@ def verify_missing_bugs(project):
 
     missing_bugs = all_bugs_in_commits.difference(known_bugs)
     if len(missing_bugs) > 0:
-        build_lp_bugs(PROJECT, update=missing_bugs)
+        build_lp_bugs(project, update=missing_bugs)
     else:
         print 'no missing bugs'
 
@@ -143,7 +143,8 @@ def load_all_analysis_data(project):
         commits, combined_commits, all_blame
 
 
-def rebuild_all_analysis_data(project, update=True, download=True):
+def rebuild_all_analysis_data(project, update=True,
+                              download=True, blame=False):
     """Rebuilds core datasets"""
 
     if download:
@@ -167,10 +168,11 @@ def rebuild_all_analysis_data(project, update=True, download=True):
     print 'Build combined_commits by joining with bugs and gerrit data'
     combined_commits = join_all(project)
 
-    print
-    print 'Building all blame'
-    combined_commits = load_combined_commits(project)
-    # build_all_blame(project, combined_commits, update=update)
+    if blame:
+        print
+        print 'Building all blame'
+        combined_commits = load_combined_commits(project)
+        build_all_blame(project, combined_commits, update=update)
 
 #
 # Join related routines

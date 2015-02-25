@@ -81,6 +81,8 @@
 #             post-processing
 # - 2/24/15 - Join code now in commit_analysis (also re-written).
 # - 2/24/15 - Renamed this file Git_Extract.py (was Git_Extract_Join.py).
+# - 2/25/15 - Handle special case in aggregate_merge_bugs_and_changes()
+#             where no ancestors.
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
@@ -602,7 +604,8 @@ def aggregate_merge_bugs_and_changes(commits):
             commits[k]['children'] = []
 
     for k, c in commits.items():  # Accumulate bugs and changes for children
-        if c['on_master_branch'] and not c['on_mainline']:
+        if (c['on_master_branch'] and not c['on_mainline']
+                and 'ancestors' in c and c['ancestors']):
             a = c['ancestors'][0]
             if not a:
                 continue
