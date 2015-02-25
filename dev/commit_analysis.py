@@ -31,6 +31,8 @@
 #             also remove cachedir from calls to build_lp_bugs()
 # - 2/23/15 - New join code - join_all()
 # - 2/24/15 - Integrated join into rebuild_all_analysis_data
+# - 2/25/15 - Updated to reflect single change_id per commit.  Added error
+#             handling when loading all_blame
 
 #
 # Top Level Routines:
@@ -121,23 +123,26 @@ def load_all_analysis_data(project):
     """
     print 'loading bug data'
     downloaded_bugs = load_lp_bugs(project)
-    print
 
     print 'loading Git commit data'
     commits = load_git_commits(project)
 
     print 'loading change data'
     all_change_details = load_gerrit_change_details(project)
-    print 'all_change_details:', len(all_change_details)
+    print '  all_change_details:', len(all_change_details)
 
     all_changes = load_gerrit_changes(project)
-    print 'all_changes:', len(all_changes)
+    print '  all_changes:', len(all_changes)
 
     combined_commits = load_combined_commits(project)
     print 'combined_commits:', len(combined_commits)
 
-    all_blame = load_all_blame(project)
-    print 'all blame:', len(all_blame)
+    try:
+        all_blame = load_all_blame(project)
+        print 'all blame:', len(all_blame)
+    except Exception:
+        print 'Error:  Unable to load blame data'
+        all_blame = False
 
     return downloaded_bugs, all_changes, all_change_details, \
         commits, combined_commits, all_blame
@@ -245,12 +250,12 @@ def join_with_gerrit(project, commits, all_changes, all_change_details):
     for cid, c in commits.items():
         c['change_details'] = []
         if 'change_id' in c:                # Join on chage_id
-            for change_id in c['change_id']:
-                if (change_id in change_by_changeid
-                        and change_id in change_details_by_changeid):
-                    change = change_by_changeid[change_id]
-                    change.update(change_details_by_changeid[change_id])
-                    c['change_details'].append(change)
+            change_id = c['change_id']
+            if (change_id in change_by_changeid
+                    and change_id in change_details_by_changeid):
+                change = change_by_changeid[change_id]
+                change.update(change_details_by_changeid[change_id])
+                c['change_details'].append(change)
     return commits
 
 

@@ -400,7 +400,7 @@ def load_lp_bugs(project):
             found += 1
 
     # print 'Object type:', type(x)
-    print 'total LP bugs:', len(x)
-    print 'Entries annotated:', found
+    print '  total LP bugs:', len(x)
+    print '  Entries annotated:', found
 
     return x

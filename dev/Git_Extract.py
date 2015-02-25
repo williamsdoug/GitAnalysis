@@ -83,6 +83,10 @@
 # - 2/24/15 - Renamed this file Git_Extract.py (was Git_Extract_Join.py).
 # - 2/25/15 - Handle special case in aggregate_merge_bugs_and_changes()
 #             where no ancestors.
+# - 2/25/15 - Store single change_id value per commit.  Revert change
+#             2/20/15 after verifying that multiple change_id per commit
+#             is a spurious result and that the last change_id per message
+#             if the definitive value.
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
@@ -164,26 +168,8 @@ def parse_all_changes(msg):
         if line.lower().startswith('change') and m:
             result.append(m.group(1))
 
-    result = list(set(result))  # dedupe
     return result
 
-"""
-
-change_template = re.compile('Change-Id:\s*(\S+)', re.IGNORECASE)
-
-def parse_change(txt):
-    "Extracts and fixes case in Change-Id "
-    txt = txt.lower()
-    m = change_template.search(txt)
-    if m:
-        val = m.group(1)
-        if val.startswith('i'):
-            val = 'I' + val[1:]
-        return {'change_id': str(val)}
-    else:
-        # print txt
-        return {}
-"""
 
 bug_template = re.compile('bug[s:\s/-]*(?:lp|lp:|lp:#|lp:)*[\s#]*(\d+)',
                           re.IGNORECASE)
@@ -312,7 +298,7 @@ def parse_msg(msg, patch=False):
 
     changes = parse_all_changes(msg)
     if changes:
-        result['change_id'] = changes
+        result['change_id'] = changes[-1]   # always use last value
 
     if patch:
         for line in msg.split('\n'):
@@ -539,11 +525,12 @@ def is_merge_commit(commit, include_special_actor=False):
     else:
         return True
 
-
+"""
 def combine_merge_commit(c, commits):
-    """ Promotes relevant information from second parent into
+    "Promotes relevant information from second parent into
     merge commit
-    """
+    "
+
     parent = commits[c['parents'][1]]
 
     if is_special_committer(c) and is_special_committer(parent):
@@ -562,6 +549,7 @@ def combine_merge_commit(c, commits):
 
     # c['msg'] = c['msg'] + '\n' + parent['msg']
     # c['parents'] = c['parents'][0:1]
+"""
 
 
 def annotate_mainline(commits, master_commit):
@@ -616,11 +604,7 @@ def aggregate_merge_bugs_and_changes(commits):
                 commits[a]['all_bugs'] = commits[a]['all_bugs'] + c['bugs']
 
             if 'change_id' in c:
-                if type(c['change_id']) is list:
-                    for change in c['change_id']:
-                        commits[a]['all_changes'].append(change)
-                else:
-                    commits[a]['all_changes'].append(c['change_id'])
+                commits[a]['all_changes'].append(c['change_id'])
 
     for k, c in commits.items():  # Dedupe results
         if c['on_mainline']:
@@ -631,7 +615,7 @@ def aggregate_merge_bugs_and_changes(commits):
 
 def consolidate_merge_commits(commits, master_commit, verbose=True):
     """Clean-up for Git Merge commits (non-fast fordward)
-    - Consolidates  all change-related information into merge commit
+    - OBSOLETE:Consolidates  all change-related information into merge commit
       - Author, Committer, change_id, bug ...
     - Eliminates all commits related to second parent
       - Including garbage collection for parents of parents ...
@@ -754,17 +738,17 @@ def load_git_commits(project, prune=True):
     name = project_to_fname(project)
     result = jload(name)
 
-    print 'total git_commits:', len(result)
+    print '  total git_commits:', len(result)
     pruned = sum([1 for v in result.values() if v['tombstone']])
     print '  actual commits:', len(result) - pruned
     print '  pruned commits:', pruned
-    print 'bug fix commits:', sum([1 for x in result.values()
-                                   if x and 'bug' in x])
-    print 'commits with change_id:', sum([1 for x in result.values()
-                                          if x and 'change_id' in x])
-    print 'bug fix with change_id:', sum([1 for x in result.values()
-                                          if x and 'change_id' in x
-                                          and 'bug' in x])
+    print '  bug fix commits:', sum([1 for x in result.values()
+                                     if x and 'bugs' in x])
+    print '  commits with change_id:', sum([1 for x in result.values()
+                                            if x and 'change_id' in x])
+    print '  bug fix with change_id:', sum([1 for x in result.values()
+                                            if x and 'change_id' in x
+                                            and 'bugs' in x])
     return result
 
 

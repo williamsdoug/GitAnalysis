@@ -156,19 +156,19 @@ def compress_messages(messages):
             + non_standard)
 
 
-def get_change_detail(changeno, _prune=True):
+def get_change_detail(changeno, prune=True):
     """Get full detail for a change """
     global REST
     query = "/changes/" + str(changeno) + '/detail'
     x = REST.get(query)
 
-    if _prune:
-        x = prune(x)
+    if prune:
+        x = prune_gerrit_entry(x)
 
     return x
 
 
-def prune(x):
+def prune_gerrit_entry(x):
     """Trim extraneous data from Gerrit history """
     # print x['_number']
     if '_sortkey' in x:
@@ -208,7 +208,7 @@ def load_gerrit_changes(project):
     name = project_to_fname(project)
     x = jload(name)
     # print 'Object type:', type(x)
-    print 'total gerrit changes:', len(x)
+    print '  total gerrit changes:', len(x)
     return x
 
 
@@ -217,7 +217,7 @@ def load_gerrit_change_details(project):
     name = project_to_fname(project, details=True)
     x = jload(name)
     # print 'Object type:', type(x)
-    print 'total gerrit changes with detail:', len(x)
+    print '  total gerrit changes with detail:', len(x)
     return x
 
 
@@ -232,7 +232,7 @@ def build_all_changes(project, update=False):
     return all_changes
 
 
-def build_all_change_details(project, update=False):
+def build_all_change_details(project, update=False, prune=True):
     """Top level routine to download detailed change data.
         Supports incremental updates.
     """
@@ -255,7 +255,7 @@ def build_all_change_details(project, update=False):
             try:
                 # time.sleep(0.03)
                 all_change_details_plus.append(get_change_detail(changeno,
-                                                                 _prune=True))
+                                                                 prune=prune))
             except Exception, e:
                 skipped += 1
             if i % 100 == 0:
@@ -283,9 +283,9 @@ def build_all_change_details(project, update=False):
         return all_change_details
 
 
-def build_gerrit_data(project, update=True):
+def build_gerrit_data(project, update=True, prune=True):
     """Top level routine for downloading or updating both summary change data
         and detailed change data.
     """
     build_all_changes(project, update=update)
-    build_all_change_details(project, update=update)
+    build_all_change_details(project, update=update, prune=prune)

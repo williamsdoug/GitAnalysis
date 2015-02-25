@@ -7,6 +7,7 @@
 # History:
 # - 1/25/15: Added history tracking, PEP-8 clean-up
 # - 2/13/15: Fixed handling of dict entries with False value
+# - 2/25/15: Removed 'returning singleton' message
 
 import cPickle as pickle
 import gzip
@@ -90,7 +91,7 @@ def jload_helper(f):
         # print 'returning list'
         return result
     elif len(result) == 1:
-        print 'returning singleton'
+        # print 'returning singleton'
         return result[0]
     else:
         return False
