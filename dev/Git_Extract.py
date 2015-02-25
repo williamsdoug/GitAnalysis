@@ -145,7 +145,7 @@ def filter_file(fname, filter_config):
 # Parse Commit Messages
 #
 
-RE_GERRIT_TEMPLATE = re.compile('(I([a-f0-9]){40})')
+RE_GERRIT_TEMPLATE = re.compile('Change-Id: (I([a-f0-9]){40})')
 
 
 def parse_all_changes(msg):
