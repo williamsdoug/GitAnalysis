@@ -20,6 +20,7 @@
 # - 3/3/15: Relax collect_all_bug_fix_commits() assertions.  Detect
 #           merge reverts as special case with merge commit has change_id
 # - 3/4/15: Added annotate_commit_reachability() and suporting code
+# - 3/4/15: Caching support for above
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -45,6 +46,7 @@ from Git_Extract import extract_master_commit
 from Git_Extract import get_all_files_from_commit
 
 from jp_load_dump import jload, jdump
+from jp_load_dump import pload, pdump
 import git
 from git import Repo
 
@@ -832,59 +834,137 @@ def top_level(rebuild=False, rebuild_with_download=False, rebuild_incr=True):
 #
 
 
-def sample_master_branch_commits(commits, master_cid, sampling_freq=100):
-    """ Extracts commits cid along master branch at regular intervals"""
+def sample_master_branch_commits(commits, master_cid,
+                                 sampling_freq=100, legacy_cutoff=0):
+    """ Extracts commits cid along master branch at regular intervals
+        Always includes master head commit and first commit after cut-off
+    """
     samples = [master_cid]
 
     current = master_cid
+    last = False
     count = 0
-    while commits[current]['parents']:
+    while (commits[current]['parents']
+           and commits[current]['date'] > legacy_cutoff):
         if commits[current]['parents'][0] in commits:
+            last = current
             current = commits[current]['parents'][0]
             count += 1
             if (count % sampling_freq) == 0:
                 samples.append(current)
         else:
             break
+
+    # Include first commit after legacy cut-off
+    if last and last != samples[-1:]:
+        samples.append(last)
+
     return samples
 
 
 def identify_reachable_commits(project, commits, legacy_cutoff=0,
-                               sampling_freq=100):
+                               sampling_freq=25, clear_cache=False):
     """Sampling along master branch, using git, determine
     commit reachability
     """
-    # Get informat about Git repo
+    print 'Identify reachable commits'
+    master_cid = extract_master_commit(commits)
     repo_name = get_repo_name(project)
     repo = Repo(repo_name)
     filter_config = get_filter_config(project)
     all_reachable_commits = set([])
 
-    print 'Identify reachable commits'
-    master_cid = extract_master_commit(commits)
+    # Load cache, if available
+    #
+    # Cache format: {sampling_freq,
+    #                min_date,
+    #                max_date,
+    #                reachability_sets: {cid:{date:,
+    #                                    commits:[list of reachable_commits]}
+    #
+    reachable_cache = False
+    try:
+        if not clear_cache:
+            reachable_cache = pload(project_to_fname(project, reachable=True))
+            if sampling_freq != reachable_cache['sampling_freq']:
+                print '****Reachable cache sampling frequency mis-match'
+                raise Exception
+            print '    Loaded cached reachability data'
+
+    except Exception:
+        print 'Failed to load reachability data'
+        clear_cache = True
+
+    if clear_cache:
+        reachable_cache = {'sampling_freq': sampling_freq,
+                           'min_date': False,
+                           'max_date': False,
+                           'reachability_sets': {}
+                           }
+
+    cache_initial_size = len(reachable_cache['reachability_sets'])
+    print '    Initial Reachable cache size:', cache_initial_size
 
     # Sample commits at regular intervals along the master branch
     sample_cids = sample_master_branch_commits(commits, master_cid,
-                                               sampling_freq)
+                                               sampling_freq, legacy_cutoff)
     print '    Samples:', len(sample_cids)
+    all_reachable = set([])
+    if cache_initial_size > 0:
+        sample_max_date = max([commits[cid]['date'] for cid in sample_cids])
+        sample_min_date = min([commits[cid]['date'] for cid in sample_cids])
+        assert (sample_max_date >= sample_min_date)
+        cache_max_date = reachable_cache['max_date']
+        cache_min_date = reachable_cache['min_date']
+        assert (cache_max_date >= cache_min_date)
 
-    # Determine relevant files for git analysis
+        # include relevant entries from cache
+        for x in reachable_cache['reachability_sets'].values():
+            if (x['date'] <= sample_max_date
+                    and x['date'] >= sample_min_date):
+                        all_reachable = all_reachable.union(set(x['commits']))
+
+        # determine additional data to be collected
+        sample_cids = [cid for cid in sample_cids
+                       if cid not in reachable_cache['reachability_sets']
+                       and (commits[cid]['date'] > cache_max_date
+                            or commits[cid]['date'] < cache_min_date)]
+        print '    Revised samples:', len(sample_cids)
+
+    # fetch incremental data
     for cid in sample_cids:
-        if commits[cid]['date'] < legacy_cutoff:
-            break
+        commit_reachable = set([])
         files = get_all_files_from_commit(cid, repo, filter_config)
         for path in files:
             blame = get_blame(cid, path, repo_name)
             if blame:
                 reachable = set([b['commit'] for b in blame])
-                all_reachable_commits = all_reachable_commits.union(reachable)
+                commit_reachable = commit_reachable.union(reachable)
+        all_reachable = all_reachable.union(commit_reachable)
+        # add to cache as well
+        reachable_cache['reachability_sets'][cid] = \
+            {'date': commits[cid]['date'],
+             'commits': list(commit_reachable)}
         print '.',
     print
-    print 'Reachable commits:', len(all_reachable_commits)
-    return list(all_reachable_commits)
+    print 'Reachable commits:', len(all_reachable)
+
+    # Save updated cache, if needed
+    if len(reachable_cache['reachability_sets']) > cache_initial_size:
+        print
+        print 'Saving updated Reachable Cache'
+        reachable_cache['min_date'] = \
+            min([r['date']
+                for r in reachable_cache['reachability_sets'].values()])
+        reachable_cache['max_date'] = \
+            max([r['date']
+                for r in reachable_cache['reachability_sets'].values()])
+        pdump(reachable_cache, project_to_fname(project, reachable=True))
+
+    return list(all_reachable)
 
 
-def annotate_commit_reachability(project, commits, sampling_freq=100):
+def annotate_commit_reachability(project, commits, sampling_freq=25):
     """Updates commit datastructure (typically combined_commits)
     based on commit reachability derived from git blame.  Don't include
     any commits that are obsolete as of leyacy cut-off"""

@@ -92,6 +92,8 @@
 # - 3/4/15  - Added new routines extract_master_commit(),
 #             extract_origin_commit() and get_all_files_from_commit() used
 #             by reachability code
+# - 3/4/15  - Added new file suffix to project_to_fname().  Used for
+#             reachable commit data.
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
@@ -134,7 +136,8 @@ INSANELY_HUGE_BRANCH_DISTANCE = 1000000000
 #
 
 
-def project_to_fname(project, patches=False, combined=False, blame=False):
+def project_to_fname(project, patches=False, combined=False,
+                     blame=False, reachable=False):
     prefix = get_corpus_dir(project)
     if patches:
         return prefix + project + "_patch_data.jsonz"
@@ -142,6 +145,8 @@ def project_to_fname(project, patches=False, combined=False, blame=False):
         return prefix + project + "_combined_commits.jsonz"
     elif blame:
         return prefix + project + "_all_blame.jsonz"
+    elif reachable:
+        return prefix + project + "_reachable.jsonz"
     else:
         return prefix + project + "_commits.jsonz"
 
