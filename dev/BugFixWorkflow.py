@@ -17,6 +17,8 @@
 #
 # History:
 # - 3/3/15: Initial version based on BugWorkflow3 notebook
+# - 3/3/15: Relax collect_all_bug_fix_commits() assertions.  Detect
+#           merge reverts as special case with merge commit has change_id
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -613,8 +615,23 @@ def collect_all_bug_fix_commits(commits, importance,
 
             # Simple merge commit
             if len(sub_branch_data['unique_changes']) == 1:
-                # change_id never on merge_commit
-                assert ('change_id' not in c)
+                # check for reverts
+                if ('Revert' in c['msg'].split('\n')[0]
+                    and 'Revert' in
+                    commits[c['parents'][1]]['msg'].split('\n')[0]
+                        and 'change_id' not in commits[c['parents'][1]]):
+                            print 'Ignoring revert:', c['cid']
+                            continue
+
+                # change_id should not be on merge_commit
+                if 'change_id' in c:
+                    print 'Unexpected change_id on simple merge, ignored',
+                    print c['cid']
+                    if len(c['files']) == 0:
+                        continue
+                    else:
+                        assert ('change_id' not in c)
+
                 # change_id always attached to parent
                 assert (commits[c['parents'][1]]['change_id'])
 
