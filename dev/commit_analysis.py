@@ -54,7 +54,6 @@
 #    from commit_analysis import verify_missing_bugs
 #
 
-
 # import numpy as np
 import collections
 import re

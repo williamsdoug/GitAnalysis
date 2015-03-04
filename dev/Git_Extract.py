@@ -89,6 +89,9 @@
 #             if the definitive value.
 # - 3/3/15  - fixed runaway limit in annotate_mainline().  Updated template
 #             to detect Change_Id to be more forgiving of whitespace
+# - 3/4/15  - Added new routines extract_master_commit(),
+#             extract_origin_commit() and get_all_files_from_commit() used
+#             by reachability code
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
@@ -97,6 +100,9 @@
 #    from Git_Extract import get_git_master_commit, get_authors_and_files
 #    from Git_Extract import filter_bug_fix_commits
 #    from Git_Extract import  filter_bug_fix_combined_commits
+#
+#     from GitExtract import extract_master_commit, extract_origin_commit
+#     from GitExtract import get_all_files_from_commit
 #
 
 from git import *
@@ -1219,7 +1225,7 @@ def annotate_commit_loc(commits, repo_name, filter_config):
                     print total_operations,
 
 #
-# ------ Other Helper Routes, not currently used --------
+# ------ Other Helper Routes, some not currently used --------
 #
 
 
@@ -1239,3 +1245,53 @@ def get_authors_and_files(commits):
             for fn in c['files']:
                 files[fn] = 1
     return authors.keys(), files.keys()
+
+
+def extract_master_commit(commits):
+    """ Extracts Master commit cid from commits datastructure"""
+    master_cid = False
+    for k, c in commits.items():
+        if 'is_master_commit' in c and c['is_master_commit']:
+            master_cid = k
+            break
+    assert(master_cid)
+    return master_cid
+
+
+def extract_origin_commit(commits):
+    """ Extracts Origin commit cid from commits datastructure"""
+    # Find current master commit
+    master_cid = extract_master_commit(commits)
+
+    # find_origin_commit
+    origin_commit = master_cid
+    while commits[origin_commit]['parents']:
+        if commits[origin_commit]['parents'][0] in commits:
+            origin_commit = commits[origin_commit]['parents'][0]
+    assert (origin_commit != master_cid)
+    return origin_commit
+
+
+def get_all_files_from_tree(git_tree, depth=0):
+    """Recursively walks Git tree to enumerate files reachable from commit"""
+    all_files = []
+    for subtree in git_tree.trees:
+        all_files += get_all_files_from_tree(subtree, depth=depth+1)
+    all_files += [blob.path for blob in git_tree.blobs]
+    return all_files
+
+
+def get_all_files_from_commit(cid, repo, filter_config, verbose=False):
+    """Get all files reachable from specified commit,
+       qualified by filtering rules
+    """
+    c = repo.commit(cid)
+    git_tree = c.tree
+    raw_files = get_all_files_from_tree(git_tree)
+    if verbose:
+        print 'Total raw files:', len(raw_files)
+    subset_files = [f for f in raw_files
+                    if filter_file(f, filter_config)]
+    if verbose:
+        print 'Total selected files:', len(subset_files)
+    return subset_files

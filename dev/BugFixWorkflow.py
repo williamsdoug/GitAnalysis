@@ -19,11 +19,13 @@
 # - 3/3/15: Initial version based on BugWorkflow3 notebook
 # - 3/3/15: Relax collect_all_bug_fix_commits() assertions.  Detect
 #           merge reverts as special case with merge commit has change_id
+# - 3/4/15: Added annotate_commit_reachability() and suporting code
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
 # from BugFixWorkflow import build_all_guilt
 # from BugFixWorkflow import annotate_guilt
+# from BugFixWorkflow import annotate_commit_reachability
 
 
 import pprint as pp
@@ -35,10 +37,12 @@ from datetime import date
 
 from commit_analysis import load_all_analysis_data
 from commit_analysis import rebuild_all_analysis_data
-from Git_Extract import assign_blame
+from Git_Extract import assign_blame, get_blame
 from commit_analysis import blame_compute_normalized_guilt
 from Git_Extract import project_to_fname
 from Git_Extract import process_commit_files_unfiltered, filter_file
+from Git_Extract import extract_master_commit
+from Git_Extract import get_all_files_from_commit
 
 from jp_load_dump import jload, jdump
 import git
@@ -78,7 +82,7 @@ def dedupe_list(x):
     return list(set(x))
 
 
-def find_legacy_cutoff(commits):
+def find_legacy_cutoff(commits, verbose=False):
     """Identifies commit timstamp for cut-over from legacy change
     tracking to use of Gerrit
     """
@@ -103,24 +107,28 @@ def find_legacy_cutoff(commits):
                         last_without = k
 
     # sanity check results
-    print 'First_with:', first_with
-    print 'Last_without:', last_without
+    if verbose:
+        print 'First_with:', first_with
+        print 'Last_without:', last_without
 
     transition_delta = (commits[first_with]['date']
                         - commits[last_without]['date'])
     if transition_delta > 0:
-        print 'Transition interval:',
-        print str(datetime.timedelta(seconds=int(transition_delta)))
-        print 'Parent of first_with:', commits[first_with]['parents'][0]
+        if verbose:
+            print 'Transition interval:',
+            print str(datetime.timedelta(seconds=int(transition_delta)))
+            print 'Parent of first_with:', commits[first_with]['parents'][0]
         assert(commits[first_with]['parents'][0] == last_without)
-        print 'Setting cutoff to:',
-        print datetime.datetime.fromtimestamp(first_with_date - 1).strftime("%d/%m/%Y")
+        if verbose:
+            print 'Setting cutoff to:',
+            print datetime.datetime.fromtimestamp(first_with_date - 1).strftime("%d/%m/%Y")
         return first_with_date - 1
     else:
-        print 'Warning: Transition Overlap:',
-        print str(datetime.timedelta(seconds=int(-transition_delta)))
-        print 'Setting cutoff to:',
-        print datetime.datetime.fromtimestamp(last_without_date).strftime("%d/%m/%Y")
+        if verbose:
+            print 'Warning: Transition Overlap:',
+            print str(datetime.timedelta(seconds=int(-transition_delta)))
+            print 'Setting cutoff to:',
+            print datetime.datetime.fromtimestamp(last_without_date).strftime("%d/%m/%Y")
         return last_without_date
 
 
@@ -768,47 +776,41 @@ def annotate_guilt(guilt_data, commits, limit=-1):
 
 
 def build_all_guilt(project, combined_commits,
-                    clear_cache=False, apply_guilt=False):
+                    clear_cache=False, apply_guilt=False,
+                    importance='low+'):
     """Top level routine for Merge processing and guilt annotation"""
-    importance = 'low+'
 
     print 'Determining legacy cut-off'
-    legacy_cutoff = find_legacy_cutoff(combined_commits)
+    legacy_cutoff = find_legacy_cutoff(combined_commits, verbose=True)
 
     # annotate_blueprints(commits)
     # foo = find_blueprint_in_bugs(all_bugs, limit=100000)
     print
     print 'Determining commit parent/child relationships'
     annotate_children(combined_commits)
-
     print
     print 'Identifying cherry-pick commits'
     annotate_cherry_pick(combined_commits)
-
     print
     print 'Collecting data on commits with bug fixes'
     guilt_data = collect_all_bug_fix_commits(combined_commits,
                                              importance,
                                              legacy_cutoff,
                                              limit=-1)
-
     print
     print 'Computing Blame'
     compute_all_blame(project, guilt_data,
                       combined_commits, clear_cache=clear_cache)
     print
-
     missing_guilt_data = find_missing_guilt_data(guilt_data)
     if len(missing_guilt_data) > 0:
         print
         print 'Warning: Entries with missing guilt data:',
         print len(missing_guilt_data)
-
     if apply_guilt:
         print
         print 'Annotating Guilt'
         annotate_guilt(guilt_data, combined_commits)
-
     return guilt_data
 
 
@@ -823,3 +825,76 @@ def top_level(rebuild=False, rebuild_with_download=False, rebuild_incr=True):
     import_all_bugs(all_bugs)
 
     guilt_data = build_all_guilt(PROJECT, combined_commits, clear_cache=True)
+
+
+#
+# Code for determining commit reachability
+#
+
+
+def sample_master_branch_commits(commits, master_cid, sampling_freq=100):
+    """ Extracts commits cid along master branch at regular intervals"""
+    samples = [master_cid]
+
+    current = master_cid
+    count = 0
+    while commits[current]['parents']:
+        if commits[current]['parents'][0] in commits:
+            current = commits[current]['parents'][0]
+            count += 1
+            if (count % sampling_freq) == 0:
+                samples.append(current)
+        else:
+            break
+    return samples
+
+
+def identify_reachable_commits(project, commits, legacy_cutoff=0,
+                               sampling_freq=100):
+    """Sampling along master branch, using git, determine
+    commit reachability
+    """
+    # Get informat about Git repo
+    repo_name = get_repo_name(project)
+    repo = Repo(repo_name)
+    filter_config = get_filter_config(project)
+    all_reachable_commits = set([])
+
+    print 'Identify reachable commits'
+    master_cid = extract_master_commit(commits)
+
+    # Sample commits at regular intervals along the master branch
+    sample_cids = sample_master_branch_commits(commits, master_cid,
+                                               sampling_freq)
+    print '    Samples:', len(sample_cids)
+
+    # Determine relevant files for git analysis
+    for cid in sample_cids:
+        if commits[cid]['date'] < legacy_cutoff:
+            break
+        files = get_all_files_from_commit(cid, repo, filter_config)
+        for path in files:
+            blame = get_blame(cid, path, repo_name)
+            if blame:
+                reachable = set([b['commit'] for b in blame])
+                all_reachable_commits = all_reachable_commits.union(reachable)
+        print '.',
+    print
+    print 'Reachable commits:', len(all_reachable_commits)
+    return list(all_reachable_commits)
+
+
+def annotate_commit_reachability(project, commits, sampling_freq=100):
+    """Updates commit datastructure (typically combined_commits)
+    based on commit reachability derived from git blame.  Don't include
+    any commits that are obsolete as of leyacy cut-off"""
+    legacy_cutoff = find_legacy_cutoff(commits)
+
+    # Initially mark all commits as unreachable
+    for c in commits.values():
+        c['reachable'] = False
+
+    for cid in identify_reachable_commits(project, commits,
+                                          legacy_cutoff, sampling_freq):
+        commits[cid]['reachable'] = True
+    return
