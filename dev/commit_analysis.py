@@ -33,6 +33,8 @@
 # - 2/24/15 - Integrated join into rebuild_all_analysis_data
 # - 2/25/15 - Updated to reflect single change_id per commit.  Added error
 #             handling when loading all_blame
+# - 2/26/15 - Clean-up handling of change_id
+# - 3/3/15  - Added additional options to rebuild_all_analysis_data()
 
 #
 # Top Level Routines:
@@ -149,29 +151,37 @@ def load_all_analysis_data(project):
 
 
 def rebuild_all_analysis_data(project, update=True,
-                              download=True, blame=False):
+                              download=True, blame=False,
+                              build_launchpad=True,
+                              build_gerrit=True,
+                              build_git=True,
+                              build_combined=True):
     """Rebuilds core datasets"""
 
-    if download:
+    if download and build_launchpad:
         print
         print 'rebuilding Launchpad (bug) data'
         build_lp_bugs(project, update=update)
 
+    if download and build_gerrit:
         print
         print 'rebuilding Gerrit data'
         build_gerrit_data(project, update=update)
 
+    if build_git:
         print
         print 'building Git data'
         build_git_commits(project, update=update)
 
+    if download and build_launchpad:
         print
         print 'Load any missing bugs, if needed'
         verify_missing_bugs(project)
 
-    print
-    print 'Build combined_commits by joining with bugs and gerrit data'
-    combined_commits = join_all(project)
+    if build_combined:
+        print
+        print 'Build combined_commits by joining with bugs and gerrit data'
+        combined_commits = join_all(project)
 
     if blame:
         print
@@ -255,7 +265,7 @@ def join_with_gerrit(project, commits, all_changes, all_change_details):
                     and change_id in change_details_by_changeid):
                 change = change_by_changeid[change_id]
                 change.update(change_details_by_changeid[change_id])
-                c['change_details'].append(change)
+                c['change_details'] = change
     return commits
 
 
@@ -365,7 +375,7 @@ def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
                        is either linear or exponential.
        exp: Specifies power functin if exponential weighting
     """
-    result = defaultdict(float)
+    result = collections.defaultdict(float)
     total = 0.0
     for per_file in blameset['blame'].values():
         if per_file:       # validate not null entry
@@ -534,7 +544,7 @@ def parse_author(s, anonymize=True):
 
 def normalize_blame_by_file(blameset, exp_weighting=True):
     """returns list of files with weighted blame"""
-    result = defaultdict(float)
+    result = collections.defaultdict(float)
     total = 0.0
     for fname, per_file in blameset['blame'].items():
         if per_file:       # validate not null entry
@@ -551,7 +561,7 @@ def normalize_blame_by_file(blameset, exp_weighting=True):
 
 
 def get_commit_count_by_author(combined_commits):
-    commits_by_author = defaultdict(float)
+    commits_by_author = collections.defaultdict(float)
     for x in combined_commits.values():
         author = parse_author(x['author'])
         commits_by_author[author] += 1.0
@@ -560,7 +570,7 @@ def get_commit_count_by_author(combined_commits):
 
 
 def get_blame_by_commit(combined_commits, all_blame):
-    blame_by_commit = defaultdict(float)
+    blame_by_commit = collections.defaultdict(float)
     for x in all_blame:
         for commit, weight in \
             blame_compute_normalized_guilt(x, exp_weighting=True,

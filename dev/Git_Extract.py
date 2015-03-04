@@ -87,6 +87,8 @@
 #             2/20/15 after verifying that multiple change_id per commit
 #             is a spurious result and that the last change_id per message
 #             if the definitive value.
+# - 3/3/15  - fixed runaway limit in annotate_mainline().  Updated template
+#             to detect Change_Id to be more forgiving of whitespace
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
@@ -151,7 +153,7 @@ def filter_file(fname, filter_config):
 # Parse Commit Messages
 #
 
-RE_GERRIT_TEMPLATE = re.compile('Change-Id: (I([a-f0-9]){40})')
+RE_GERRIT_TEMPLATE = re.compile('[Cc]hange-[Ii]d:\s*(I([a-f0-9]){40})')
 
 
 def parse_all_changes(msg):
@@ -552,7 +554,7 @@ def combine_merge_commit(c, commits):
 """
 
 
-def annotate_mainline(commits, master_commit):
+def annotate_mainline(commits, master_commit, runaway=1000000):
     """Master branch mainline is considered as lineage from Master
     commit by following first parent
     """
@@ -568,7 +570,6 @@ def annotate_mainline(commits, master_commit):
     commits[master_commit]['is_master_commit'] = True
     commits[master_commit]['distance_from_mainline'] = 0
     current = master_commit
-    runaway = 10000
 
     while current and runaway > 0:
         runaway -= 1
@@ -613,7 +614,8 @@ def aggregate_merge_bugs_and_changes(commits):
     return commits
 
 
-def consolidate_merge_commits(commits, master_commit, verbose=True):
+def consolidate_merge_commits(commits, master_commit,
+                              verbose=True, runaway=1000000):
     """Clean-up for Git Merge commits (non-fast fordward)
     - OBSOLETE:Consolidates  all change-related information into merge commit
       - Author, Committer, change_id, bug ...
@@ -645,7 +647,7 @@ def consolidate_merge_commits(commits, master_commit, verbose=True):
         print 'starting commits:', len(commits)
 
     # prune commits and any predecessor commits no on master branch
-    runaway = 100000
+
     while prune and runaway > 0:
         runaway -= 1
         cid, ancestors = prune[0]
