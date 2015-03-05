@@ -89,7 +89,7 @@ def verify_missing_bugs(project):
     if not, attempt to load these bugs"""
 
     all_bugs = load_lp_bugs(project)
-    commits = load_git_commits(project, prune=False)
+    commits = load_git_commits(project)
 
     all_bugs_in_commits = set([b for c in commits.values()
                                if 'bugs' in c for b in c['bugs']])
@@ -210,7 +210,7 @@ def load_combined_commits(project):
 def join_all(project):
     """Top level join routine"""
     all_bugs = load_lp_bugs(project)
-    commits = load_git_commits(project, prune=False)
+    commits = load_git_commits(project)
     all_changes = load_gerrit_changes(project)
     all_change_details = load_gerrit_change_details(project)
 

@@ -6,7 +6,7 @@
 #
 # Currently being tested using OpenStack (Nova, Swift, Glance, Cinder, Heat)
 #
-# Last updated 2/20/2014
+# Last updated 3/5/2015
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -632,31 +632,6 @@ def is_merge_commit(commit, include_special_actor=False):
     else:
         return True
 
-"""
-def combine_merge_commit(c, commits):
-    "Promotes relevant information from second parent into
-    merge commit
-    "
-
-    parent = commits[c['parents'][1]]
-
-    if is_special_committer(c) and is_special_committer(parent):
-        c['committer'] = c['author']
-        c['author'] = parent['author']
-    elif is_special_committer(c):
-        c['author'] = parent['author']
-        c['committer'] = parent['committer']
-    else:
-        c['author'] = parent['author']
-
-    if 'change_id' in parent:
-        c['change_id'] = parent['change_id']
-    if 'bug' not in c and 'bug' in parent:
-        c['bug'] = parent['bug']
-
-    # c['msg'] = c['msg'] + '\n' + parent['msg']
-    # c['parents'] = c['parents'][0:1]
-"""
 
 #
 # annotation code
@@ -683,8 +658,6 @@ def annotate_mainline(commits, master_commit, runaway=1000000):
         v['distance_from_mainline'] = INSANELY_HUGE_BRANCH_DISTANCE
         v['is_master_commit'] = False
         v['ancestors'] = False
-        v['tombstone'] = False
-        v['merge_commit'] = False
 
     commits[master_commit]['is_master_commit'] = True
     commits[master_commit]['distance_from_mainline'] = 0
@@ -699,118 +672,6 @@ def annotate_mainline(commits, master_commit, runaway=1000000):
             current = c['parents'][0]
         else:
             current = False
-
-    return commits
-
-
-
-
-
-
-
-
-
-
-def aggregate_merge_bugs_and_changes(commits):
-    """Associates bugs and changes with each merge commit"""
-    for k, c in commits.items():  # Initialize
-        if c['on_mainline']:
-            commits[k]['all_bugs'] = []
-            commits[k]['all_changes'] = []
-            commits[k]['children'] = []
-
-    for k, c in commits.items():  # Accumulate bugs and changes for children
-        if (c['on_master_branch'] and not c['on_mainline']
-                and 'ancestors' in c and c['ancestors']):
-            a = c['ancestors'][0]
-            if not a:
-                continue
-
-            commits[a]['children'].append(k)
-
-            if 'bugs' in c:
-                commits[a]['all_bugs'] = commits[a]['all_bugs'] + c['bugs']
-
-            if 'change_id' in c:
-                commits[a]['all_changes'].append(c['change_id'])
-
-    for k, c in commits.items():  # Dedupe results
-        if c['on_mainline']:
-            commits[k]['all_bugs'] = list(set(commits[k]['all_bugs']))
-            commits[k]['all_changes'] = list(set(commits[k]['all_changes']))
-    return commits
-
-
-def consolidate_merge_commits(commits, master_commit,
-                              verbose=True, runaway=1000000):
-    """Clean-up for Git Merge commits (non-fast fordward)
-    - OBSOLETE:Consolidates  all change-related information into merge commit
-      - Author, Committer, change_id, bug ...
-    - Eliminates all commits related to second parent
-      - Including garbage collection for parents of parents ...
-    - Established overall commit ordering
-    """
-    # Annotate mainline within master branch
-    print 'Master Commit:', master_commit
-    commits = annotate_mainline(commits, master_commit)
-
-    # sanity-check merges (relative to master branch')
-    # check_merge_stats(commits, verbose=verbose)
-
-    # populate pruning last from merge commits
-    prune = []    # prune entries [cid, ancestors]
-    for c in commits.values():
-        if is_merge_commit(c):
-            c['merge_commit'] = True
-            for p in c['parents'][1:]:
-                ancestors = [c['cid']]
-                prune.append([p, ancestors])
-            # combine_merge_commit(c, commits)
-        else:
-            c['merge_commit'] = False
-
-    if verbose:
-        print 'initial commmits to be pruned:', len(prune)
-        print 'starting commits:', len(commits)
-
-    # prune commits and any predecessor commits no on master branch
-
-    while prune and runaway > 0:
-        runaway -= 1
-        cid, ancestors = prune[0]
-        del prune[0]
-        if cid not in commits or not commits[cid]:
-            continue
-        c = commits[cid]
-
-        for p in c['parents']:
-            if (p in commits and commits[p]
-               and not commits[p]['on_mainline']):
-                prune.append([p, ancestors + [cid]])
-        commits[cid]['tombstone'] = True
-        this_branch_distance = len(ancestors)
-        if this_branch_distance < commits[cid]['distance_from_mainline']:
-            commits[cid]['ancestors'] = ancestors
-            commits[cid]['distance_from_mainline'] = this_branch_distance
-
-    # Prune anything outside of Master Branch
-    for c in commits.values():
-        if not c['on_master_branch']:
-            c['tombstone'] = True
-
-    # order commits based on timestamp
-    commit_order = [[c['cid'], c['date']] for c in commits.values()
-                    if not c['tombstone']]
-    commit_order = sorted(commit_order, key=lambda z: z[1])
-    for i, (cid, _) in enumerate(commit_order):
-        commits[cid]['order'] = i + 1
-
-    # aggregate bug and change information
-    commits = aggregate_merge_bugs_and_changes(commits)
-
-    if verbose:
-        print 'commits after pruning:',
-        print sum([1 for c in commits.values() if not c['tombstone']])
 
     return commits
 
@@ -831,7 +692,7 @@ def build_git_commits(project, update=True, include_patch=False,
     if update:
         try:
             # Commits will include pruned entries
-            commits = load_git_commits(project, prune=False)
+            commits = load_git_commits(project)
         except Exception:
             update = False
 
@@ -853,9 +714,15 @@ def build_git_commits(project, update=True, include_patch=False,
     print '  Identifying cherry-pick commits'
     annotate_cherry_pick(commits)
 
+    master_commit = get_git_master_commit(repo_name)
+    print 'Master Commit:', master_commit
+    commits = annotate_mainline(commits, master_commit)
+
+    """
     print 'Consolidate Git Merge related commits'
     commits = consolidate_merge_commits(commits,
                                         get_git_master_commit(repo_name))
+    """
 
     annotate_children(commits)   # note parent/child relationships
 
@@ -867,16 +734,13 @@ def build_git_commits(project, update=True, include_patch=False,
     jdump(commits, project_to_fname(project))
 
 
-def load_git_commits(project, prune=True):
+def load_git_commits(project):
     """Top level routine to load commit data, returns dict indexed by cid"""
 
     name = project_to_fname(project)
     result = jload(name)
 
     print '  total git_commits:', len(result)
-    pruned = sum([1 for v in result.values() if v['tombstone']])
-    print '  actual commits:', len(result) - pruned
-    print '  pruned commits:', pruned
     print '  bug fix commits:', sum([1 for x in result.values()
                                      if x and 'bugs' in x])
     print '  commits with change_id:', sum([1 for x in result.values()
@@ -1087,13 +951,26 @@ def identify_jenkins_commit(commits):
 # Routines to annotate commits by order of change
 #
 
+def git_annotate_commit_order(commits):
+    """Asserts global ordering of commits based on commit date"""
+    # Remove any prior ordering
+    for k, c in commits.items():
+        if 'order' in c:
+            del commits[k]['order']
+
+    commit_order = [[c['cid'], c['date']] for c in commits.values()
+                    if c['reachable']]
+    commit_order = sorted(commit_order, key=lambda z: z[1])
+    for i, (cid, _) in enumerate(commit_order):
+        commits[cid]['order'] = i + 1
+
 
 def git_annotate_author_order(commits):
     """Order of change by author - author maturity"""
     author_commits = collections.defaultdict(list)
 
     for k, c in commits.items():
-        if not c['tombstone']:
+        if 'order' in c:
             author_commits[c['author']].append((c['order'], k))
 
     for author, val in author_commits.items():
@@ -1106,7 +983,7 @@ def git_annotate_file_order(commits):
     file_commits = collections.defaultdict(list)
 
     for k, c in commits.items():
-        if not c['tombstone']:
+        if 'order' in c:
             for fname in c['files']:
                 file_commits[fname].append((c['order'], k))
             c['file_order'] = {}    # Use this as oppty to track on new field
@@ -1122,7 +999,7 @@ def git_annotate_file_order_by_author(commits):
         lambda: collections.defaultdict(list))
 
     for k, c in commits.items():
-        if not c['tombstone']:
+        if 'order' in c:
             for fname in c['files']:
                 file_commits_by_author[fname][c['author']].append((c['order'],
                                                                    k))
@@ -1137,11 +1014,12 @@ def git_annotate_file_order_by_author(commits):
 
 def git_annotate_order(commits, repo_name):
     """ Annotates commits with ordering information
-        - Overall commit order   [handled in consolidate_merge_commits()]
+        - Overall commit order
         - Order of commit on a per-file basis
         - Order of commits by author
         - Order of commits by author on per-file basis
     """
+    git_annotate_commit_order(commits)
     git_annotate_author_order(commits)
     git_annotate_file_order(commits)
     git_annotate_file_order_by_author(commits)
@@ -1265,6 +1143,138 @@ def get_all_files_from_commit(cid, repo, filter_config, verbose=False):
 #
 #
 
+def _consolidate_merge_commits(commits, master_commit,
+                               verbose=True, runaway=1000000):
+    """Clean-up for Git Merge commits (non-fast fordward)
+    - OBSOLETE:Consolidates  all change-related information into merge commit
+      - Author, Committer, change_id, bug ...
+    - Eliminates all commits related to second parent
+      - Including garbage collection for parents of parents ...
+    - Established overall commit ordering
+    """
+    # Annotate mainline within master branch
+    print 'Master Commit:', master_commit
+    commits = annotate_mainline(commits, master_commit)
+
+    # sanity-check merges (relative to master branch')
+    # check_merge_stats(commits, verbose=verbose)
+
+    # Reset branch-related values
+    for v in commits.values():
+        v['tombstone'] = False
+        v['merge_commit'] = False
+
+    # populate pruning last from merge commits
+    prune = []    # prune entries [cid, ancestors]
+    for c in commits.values():
+        if is_merge_commit(c):
+            c['merge_commit'] = True
+            for p in c['parents'][1:]:
+                ancestors = [c['cid']]
+                prune.append([p, ancestors])
+            # combine_merge_commit(c, commits)
+        else:
+            c['merge_commit'] = False
+
+    if verbose:
+        print 'initial commmits to be pruned:', len(prune)
+        print 'starting commits:', len(commits)
+
+    # prune commits and any predecessor commits no on master branch
+
+    while prune and runaway > 0:
+        runaway -= 1
+        cid, ancestors = prune[0]
+        del prune[0]
+        if cid not in commits or not commits[cid]:
+            continue
+        c = commits[cid]
+
+        for p in c['parents']:
+            if (p in commits and commits[p]
+               and not commits[p]['on_mainline']):
+                prune.append([p, ancestors + [cid]])
+        commits[cid]['tombstone'] = True
+        this_branch_distance = len(ancestors)
+        if this_branch_distance < commits[cid]['distance_from_mainline']:
+            commits[cid]['ancestors'] = ancestors
+            commits[cid]['distance_from_mainline'] = this_branch_distance
+
+    # Prune anything outside of Master Branch
+    for c in commits.values():
+        if not c['on_master_branch']:
+            c['tombstone'] = True
+
+    # order commits based on timestamp
+    commit_order = [[c['cid'], c['date']] for c in commits.values()
+                    if not c['tombstone']]
+    commit_order = sorted(commit_order, key=lambda z: z[1])
+    for i, (cid, _) in enumerate(commit_order):
+        commits[cid]['order'] = i + 1
+
+    # aggregate bug and change information
+    commits = aggregate_merge_bugs_and_changes(commits)
+
+    if verbose:
+        print 'commits after pruning:',
+        print sum([1 for c in commits.values() if not c['tombstone']])
+
+    return commits
+
+
+def _aggregate_merge_bugs_and_changes(commits):
+    """Associates bugs and changes with each merge commit"""
+    for k, c in commits.items():  # Initialize
+        if c['on_mainline']:
+            commits[k]['all_bugs'] = []
+            commits[k]['all_changes'] = []
+            commits[k]['children'] = []
+
+    for k, c in commits.items():  # Accumulate bugs and changes for children
+        if (c['on_master_branch'] and not c['on_mainline']
+                and 'ancestors' in c and c['ancestors']):
+            a = c['ancestors'][0]
+            if not a:
+                continue
+
+            commits[a]['children'].append(k)
+
+            if 'bugs' in c:
+                commits[a]['all_bugs'] = commits[a]['all_bugs'] + c['bugs']
+
+            if 'change_id' in c:
+                commits[a]['all_changes'].append(c['change_id'])
+
+    for k, c in commits.items():  # Dedupe results
+        if c['on_mainline']:
+            commits[k]['all_bugs'] = list(set(commits[k]['all_bugs']))
+            commits[k]['all_changes'] = list(set(commits[k]['all_changes']))
+    return commits
+
+
+def _combine_merge_commit(c, commits):
+    """Promotes relevant information from second parent into
+    merge commit
+    """
+
+    parent = commits[c['parents'][1]]
+
+    if is_special_committer(c) and is_special_committer(parent):
+        c['committer'] = c['author']
+        c['author'] = parent['author']
+    elif is_special_committer(c):
+        c['author'] = parent['author']
+        c['committer'] = parent['committer']
+    else:
+        c['author'] = parent['author']
+
+    if 'change_id' in parent:
+        c['change_id'] = parent['change_id']
+    if 'bug' not in c and 'bug' in parent:
+        c['bug'] = parent['bug']
+
+    # c['msg'] = c['msg'] + '\n' + parent['msg']
+    # c['parents'] = c['parents'][0:1]
 
 def _load_all_blame(project):
     """Top level routine to load blame data"""
