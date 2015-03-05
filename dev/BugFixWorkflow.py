@@ -21,7 +21,7 @@
 #           merge reverts as special case with merge commit has change_id
 # - 3/4/15: Added annotate_commit_reachability() and suporting code
 # - 3/4/15: Caching support for above
-# - 3/5/15: Cosmetic changes.
+# - 3/5/15: Cosmetic changes.  Filtered warning messages about missing guilt
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -110,27 +110,27 @@ def find_legacy_cutoff(commits, verbose=False):
                         last_without = k
 
     # sanity check results
-    if verbose:
-        print 'First_with:', first_with
-        print 'Last_without:', last_without
+    if False:
+        print '  First_with:', first_with
+        print '  Last_without:', last_without
 
     transition_delta = (commits[first_with]['date']
                         - commits[last_without]['date'])
     if transition_delta > 0:
         if verbose:
-            print 'Transition interval:',
+            print '  Transition interval:',
             print str(datetime.timedelta(seconds=int(transition_delta)))
-            print 'Parent of first_with:', commits[first_with]['parents'][0]
+            print '  Parent of first_with:', commits[first_with]['parents'][0]
         assert(commits[first_with]['parents'][0] == last_without)
         if verbose:
-            print 'Setting cutoff to:',
+            print '  Setting cutoff to:',
             print datetime.datetime.fromtimestamp(first_with_date - 1).strftime("%d/%m/%Y")
         return first_with_date - 1
     else:
         if verbose:
-            print 'Warning: Transition Overlap:',
+            print '  Warning: Transition Overlap:',
             print str(datetime.timedelta(seconds=int(-transition_delta)))
-            print 'Setting cutoff to:',
+            print '  Setting cutoff to:',
             print datetime.datetime.fromtimestamp(last_without_date).strftime("%d/%m/%Y")
         return last_without_date
 
@@ -665,9 +665,9 @@ def collect_all_bug_fix_commits(commits, importance,
                 pass
 
         pass
-    print 'Mainline Commits ignored due to legacy:',
+    print '  Mainline Commits ignored due to legacy:',
     print legacy_ignored, ' out of:', total_mainline
-    print 'Total commite requiring blame computation:', len(guilt_data)
+    print '  Total commite requiring blame computation:', len(guilt_data)
     return guilt_data
 
 
@@ -703,9 +703,9 @@ def compute_all_blame(project, guilt_data, combined_commits,
         pass
 
     blame_cache_initial_size = len(blame_cache)
-    print 'Initial Blame cache size:', blame_cache_initial_size
+    print '  Initial Blame cache size:', blame_cache_initial_size
 
-    print 'bug fix commits:', len(guilt_data)
+    print '  bug fix commits:', len(guilt_data)
 
     progress = 0
     for be in guilt_data:
@@ -754,7 +754,7 @@ def compute_all_blame(project, guilt_data, combined_commits,
 
     if len(blame_cache) > blame_cache_initial_size:
         print
-        print 'Saving updated Blame Cache'
+        print '  Saving updated Blame Cache'
         jdump(blame_cache, project_to_fname(project, blame=True))
         # Hack to remove artifacts left by jdump
         for k in blame_cache.keys():   # remove key artifact from jload
@@ -766,8 +766,10 @@ def compute_all_blame(project, guilt_data, combined_commits,
 #
 
 
-def find_missing_guilt_data(guilt_data):
-    return [entry for entry in guilt_data if not entry['blame']]
+def verity_missing_guilt_data(guilt_data, commits):
+    return [entry for entry in guilt_data
+            if not entry['blame']
+            and len(commits[entry['diff_commit']]['files']) > 0]
 
 
 def annotate_guilt(guilt_data, commits, limit=-1):
@@ -799,10 +801,10 @@ def build_all_guilt(project, combined_commits,
     print
     print 'Determining commit parent/child relationships'
     annotate_children(combined_commits)
-    print
+
     print 'Identifying cherry-pick commits'
     annotate_cherry_pick(combined_commits)
-    print
+
     print 'Collecting data on commits with bug fixes'
     guilt_data = collect_all_bug_fix_commits(combined_commits,
                                              importance,
@@ -813,13 +815,13 @@ def build_all_guilt(project, combined_commits,
     compute_all_blame(project, guilt_data,
                       combined_commits, clear_cache=clear_cache)
     print
-    missing_guilt_data = find_missing_guilt_data(guilt_data)
+    missing_guilt_data = verity_missing_guilt_data(guilt_data,
+                                                   combined_commits)
     if len(missing_guilt_data) > 0:
         print
-        print 'Warning: Entries with missing guilt data:',
+        print '** Warning: Blame entries with missing guilt data:',
         print len(missing_guilt_data)
     if apply_guilt:
-        print
         print 'Annotating Guilt'
         annotate_guilt(guilt_data, combined_commits)
     return guilt_data
@@ -912,12 +914,12 @@ def identify_reachable_commits(project, commits, legacy_cutoff=0,
                            }
 
     cache_initial_size = len(reachable_cache['reachability_sets'])
-    print '    Initial Reachable cache size:', cache_initial_size
+    print '  Initial Reachable cache size:', cache_initial_size
 
     # Sample commits at regular intervals along the master branch
     sample_cids = sample_master_branch_commits(commits, master_cid,
                                                sampling_freq, legacy_cutoff)
-    print '    Samples:', len(sample_cids)
+    print '  Samples:', len(sample_cids)
     all_reachable = set([])
     if cache_initial_size > 0:
         sample_max_date = max([commits[cid]['date'] for cid in sample_cids])
@@ -938,7 +940,7 @@ def identify_reachable_commits(project, commits, legacy_cutoff=0,
                        if cid not in reachable_cache['reachability_sets']
                        and (commits[cid]['date'] > cache_max_date
                             or commits[cid]['date'] < cache_min_date)]
-        print '    Revised samples:', len(sample_cids)
+        print '  Revised samples:', len(sample_cids)
 
     # fetch incremental data
     for cid in sample_cids:
@@ -956,7 +958,7 @@ def identify_reachable_commits(project, commits, legacy_cutoff=0,
              'commits': list(commit_reachable)}
         print '.',
     print
-    print 'Reachable commits:', len(all_reachable)
+    print '  Reachable commits:', len(all_reachable)
 
     # Save updated cache, if needed
     if len(reachable_cache['reachability_sets']) > cache_initial_size:
