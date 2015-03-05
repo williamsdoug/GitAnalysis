@@ -21,6 +21,7 @@
 #           merge reverts as special case with merge commit has change_id
 # - 3/4/15: Added annotate_commit_reachability() and suporting code
 # - 3/4/15: Caching support for above
+# - 3/5/15: Cosmetic changes.
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -316,11 +317,45 @@ def annotate_children(commits):
 
 
 #
+#
 # Merge and Bug Fix Processing
 #
+#
 
-# Individual merge-type specific helper functions
+#
+# Individual Change merge-type specific helper functions (currently unused)
+#
 
+def process_ffc_change(c, verbose=False):
+    if verbose:
+        print 'FFC:', c['cid']
+    c['is_tracked_change'] = True
+    if not author_commiter_same(c):
+        # print '    different author and committer'
+        pass
+    pass
+
+
+def process_simple_merge_change(c, commits, verbose=False):
+    if verbose:
+        print 'Simple Merge:', c['cid']
+
+    # USE PARENT COMMIT FOR CHANGE_ID AND READ_AUTHOR
+    if not author_commiter_same(commits[c['parents'][1]]):
+        # print '    different author and committer'
+        pass
+    pass
+
+
+def process_complex_merge_change(c, commits, verbose=False):
+    if verbose:
+        print 'Complex Merge:', c['cid']
+    pass
+
+
+#
+# Individual Bug Fix merge-type specific helper functions
+#
 
 def process_ffc_bug_fix(c, importance, verbose=False):
     if verbose:
@@ -334,16 +369,6 @@ def process_ffc_bug_fix(c, importance, verbose=False):
             'blame_commit': blame_commit,
             'bugs': filter_bugs(c['bug_details'].keys(), importance),
             'type': 'fast_forward', 'merge_commit': c['cid']}
-
-
-def process_ffc_change(c, verbose=False):
-    if verbose:
-        print 'FFC:', c['cid']
-    c['is_tracked_change'] = True
-    if not author_commiter_same(c):
-        # print '    different author and committer'
-        pass
-    pass
 
 
 def process_simple_merge_bug_fix(c, commits, sub_branch_data,
@@ -363,23 +388,6 @@ def process_simple_merge_bug_fix(c, commits, sub_branch_data,
             'blame_commit': blame_commit,
             'bugs': sub_branch_data['unique_bugs'],
             'type': 'simple_merge', 'merge_commit': c['cid']}
-    pass
-
-
-def process_simple_merge_change(c, commits, verbose=False):
-    if verbose:
-        print 'Simple Merge:', c['cid']
-
-    # USE PARENT COMMIT FOR CHANGE_ID AND READ_AUTHOR
-    if not author_commiter_same(commits[c['parents'][1]]):
-        # print '    different author and committer'
-        pass
-    pass
-
-
-def process_complex_merge_change(c, commits, verbose=False):
-    if verbose:
-        print 'Complex Merge:', c['cid']
     pass
 
 
@@ -410,7 +418,7 @@ def process_complex_merge_bug_fix(c, commits, sub_branch_data, verbose=False):
                 results.append({'cid': change_cid, 'diff_commit': diff_commit,
                                 'blame_commit': blame_commit,
                                 'bugs': relevant_bugs,
-                                'type': 'complex_merge',
+                                'type': 'complex_merge_1',
                                 'merge_commit': c['cid']})
                 if False:
                     print '   Diff:', diff_commit
@@ -428,7 +436,7 @@ def process_complex_merge_bug_fix(c, commits, sub_branch_data, verbose=False):
                 results.append({'cid': change_cid, 'diff_commit': diff_commit,
                                 'blame_commit': blame_commit,
                                 'bugs': relevant_bugs,
-                                'type': 'complex_merge',
+                                'type': 'complex_merge_2',
                                 'merge_commit': c['cid']})
                 if False:
                     print '   Diff:', diff_commit
@@ -439,22 +447,23 @@ def process_complex_merge_bug_fix(c, commits, sub_branch_data, verbose=False):
             # Method 3: Probably stable branch, try to compare
             # with predecessor commit
             if len(change_commit['parents']) == 1:
-                print 'Method 3 complex commit:', change_cid
-                if 'cherry_picked_to' in change_commit:
-                    print 'Commit:', change_cid
-                    print '  Cherry picked to:',
-                    print change_commit['cherry_picked_to']
-                if 'cherry_picked_from' in change_commit:
-                    print 'Commit:', change_cid
-                    print '  Cherry picked from:',
-                    print change_commit['cherry_picked_from']
+                if verbose:
+                    print 'Method 3 complex commit:', change_cid
+                    if 'cherry_picked_to' in change_commit:
+                        print 'Commit:', change_cid
+                        print '  Cherry picked to:',
+                        print change_commit['cherry_picked_to']
+                    if 'cherry_picked_from' in change_commit:
+                        print 'Commit:', change_cid
+                        print '  Cherry picked from:',
+                        print change_commit['cherry_picked_from']
 
                 diff_commit = change_cid
                 blame_commit = change_commit['parents'][0]
                 results.append({'cid': change_cid, 'diff_commit': diff_commit,
                                 'blame_commit': blame_commit,
                                 'bugs': relevant_bugs,
-                                'type': 'complex_merge',
+                                'type': 'complex_merge_3',
                                 'merge_commit': c['cid']})
                 if False:
                     print '   Diff:', diff_commit
