@@ -21,13 +21,17 @@
 #           merge reverts as special case with merge commit has change_id
 # - 3/4/15: Added annotate_commit_reachability() and suporting code
 # - 3/4/15: Caching support for above
-# - 3/5/15: Cosmetic changes.  Filtered warning messages about missing guilt
+# - 3/5/15: Cosmetic changes.  Filtered warning messages about missing guilt.
+# - 3/5/15: add prune_empty_commits()
+# - 3/5/15: New top-level routine commit_postprocessing() implementing overall
+#           bug workflow.
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
 # from BugFixWorkflow import build_all_guilt
 # from BugFixWorkflow import annotate_guilt
 # from BugFixWorkflow import annotate_commit_reachability
+# from BugFixWorkflow import commit_postprocessing
 
 
 import pprint as pp
@@ -46,6 +50,7 @@ from Git_Extract import process_commit_files_unfiltered, filter_file
 from Git_Extract import extract_master_commit
 from Git_Extract import get_all_files_from_commit
 from Git_Extract import author_commiter_same
+from Git_Extract import git_annotate_order
 
 from jp_load_dump import jload, jdump
 from jp_load_dump import pload, pdump
@@ -691,7 +696,7 @@ def annotate_guilt(guilt_data, commits, limit=-1):
 
 
 def build_all_guilt(project, combined_commits,
-                    clear_cache=False, apply_guilt=False,
+                    clear_cache=False, apply_guilt=True,
                     importance='low+'):
     """Top level routine for Merge processing and guilt annotation"""
 
@@ -720,18 +725,34 @@ def build_all_guilt(project, combined_commits,
     return guilt_data
 
 
-def top_level(rebuild=False, rebuild_with_download=False, rebuild_incr=True):
+#
+# Top level BugWorkflow routine
+
+def commit_postprocessing(project, importance='low+',
+                          rebuild=False,
+                          rebuild_with_download=False,
+                          rebuild_incr=True):
+    """Top level bug-workflow routine. Computes guilt, determines
+    commit relevance and annotates commit ordering.
+    """
     if rebuild:    # Only rebuilds combined_commits
         rebuild_all_analysis_data(PROJECT, update=rebuild_incr,
                                   download=rebuild_with_download)
 
     all_bugs, all_changes, all_change_details, \
-        commits, combined_commits, all_blame = load_all_analysis_data(PROJECT)
+        commits, combined_commits = load_all_analysis_data(project)
 
-    import_all_bugs(all_bugs)
+    import_all_bugs(all_bugs)  # hack to make bug data visible
+    legacy_cutoff = find_legacy_cutoff(combined_commits)
 
-    guilt_data = build_all_guilt(PROJECT, combined_commits, clear_cache=True)
+    guilt_data = build_all_guilt(project, combined_commits,
+                                 importance=importance)
 
+    # Use git_blame to tag commits for inclusion in feature set
+    annotate_commit_reachability(project, combined_commits)
+    prune_empty_commits(combined_commits, legacy_cutoff)
+    git_annotate_order(combined_commits, get_repo_name(project))
+    return combined_commits
 
 #
 # Code for determining commit reachability
@@ -882,3 +903,15 @@ def annotate_commit_reachability(project, commits, sampling_freq=25):
                                           legacy_cutoff, sampling_freq):
         commits[cid]['reachable'] = True
     return
+
+
+def prune_empty_commits(commits, legacy_cutoff):
+    """Removes commits where all fles previously filtered
+       by making unreachable"""
+    reachable_empty_commits = [k for k, c in commits.items()
+                               if c['on_master_branch']
+                               and c['reachable']
+                               and c['date'] > legacy_cutoff
+                               and len(c['files']) == 0]
+    for k in reachable_empty_commits:
+        commits[k]['reachable'] = False

@@ -139,17 +139,6 @@ def load_all_analysis_data(project):
     combined_commits = load_combined_commits(project)
     print 'combined_commits:', len(combined_commits)
 
-    """
-    try:
-        all_blame = load_all_blame(project)
-        print 'all blame:', len(all_blame)
-    except Exception:
-        print 'Error:  Unable to load blame data'
-        all_blame = False
-    return downloaded_bugs, all_changes, all_change_details, \
-        commits, combined_commits, all_blame
-    """
-
     return downloaded_bugs, all_changes, all_change_details, \
         commits, combined_commits
 
