@@ -495,17 +495,9 @@ def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
         return {}
 
 
-def extract_features_helper(combined_commits, all_blame,
+def extract_features_helper(combined_commits,
                             min_order, max_order,
                             offset, limit):
-    """
-    if not min_order and not max_order:
-        min_order, max_order = trim_entries(combined_commits, all_blame)
-    elif not min_order:
-        min_order, _ = trim_entries(combined_commits, all_blame)
-    elif not max_order:
-        _, max_order = trim_entries(combined_commits, all_blame)
-    """
 
     order_range = max_order - min_order
 
@@ -530,13 +522,13 @@ def extract_features_helper(combined_commits, all_blame,
 
     cid, Y, features = zip(*[create_feature(x)
                              for x in combined_commits.values()
-                             if (x['order'] >= min_order
+                             if (x['reachable'] and x['order'] >= min_order
                                  and x['order'] <= max_order)])
 
     return cid, Y, features
 
 
-def fit_features(combined_commits, all_blame,
+def fit_features(combined_commits,
                  min_order=False, max_order=False,
                  offset=0, limit=0):
     """Fits features in preparation for extract_features()
@@ -557,7 +549,6 @@ def fit_features(combined_commits, all_blame,
     extract_state = {'vec': vec, 'scaler': scaler}
 
     cid, Y, features = extract_features_helper(combined_commits,
-                                               all_blame,
                                                min_order, max_order,
                                                offset, limit)
 
@@ -566,7 +557,7 @@ def fit_features(combined_commits, all_blame,
     return extract_state
 
 
-def extract_features(combined_commits, all_blame, extract_state,
+def extract_features(combined_commits, extract_state,
                      threshold=False,
                      clip=False, min_order=False, max_order=False,
                      offset=0, limit=0, equalize=False,
@@ -591,7 +582,6 @@ def extract_features(combined_commits, all_blame, extract_state,
     scaler = extract_state['scaler']
 
     cid, Y, features = extract_features_helper(combined_commits,
-                                               all_blame,
                                                min_order, max_order,
                                                offset, limit)
 
