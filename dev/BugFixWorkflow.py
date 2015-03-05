@@ -45,6 +45,7 @@ from Git_Extract import project_to_fname
 from Git_Extract import process_commit_files_unfiltered, filter_file
 from Git_Extract import extract_master_commit
 from Git_Extract import get_all_files_from_commit
+from Git_Extract import author_commiter_same
 
 from jp_load_dump import jload, jdump
 from jp_load_dump import pload, pdump
@@ -187,58 +188,6 @@ def is_bug_fix(c, importance='low+', status='fixed', heat=-1):
 # Parsing and Annotation Routines
 #
 
-RE_BLUEPRINT_TEMPLATE1 = re.compile('blueprint:?\s*(\S+)$')
-RE_BLUEPRINT_TEMPLATE2 = re.compile('bp:?\s*(\S+)$')
-
-
-def get_commit_blueprint(msg):
-    blueprint = False
-    if 'blueprint' in msg.lower():
-        for line in msg.lower().splitlines():
-            if 'blueprint' in line:
-                if '//blueprints.launchpad.net' in line:
-                    blueprint = line.split('/')[-1]
-                    return blueprint
-                else:
-                    m = RE_BLUEPRINT_TEMPLATE1.search(line)
-                    if m:
-                        blueprint = m.group(1)
-                        if blueprint.endswith('.'):
-                            blueprint = blueprint[:-1]
-                        return blueprint
-    if 'bp' in msg.lower():
-        for line in msg.lower().splitlines():
-            if 'bp' in line:
-                m = RE_BLUEPRINT_TEMPLATE2.search(line)
-                if m:
-                    blueprint = m.group(1)
-                    if blueprint.endswith('.'):
-                        blueprint = blueprint[:-1]
-                    return blueprint
-    return False
-
-
-def test_get_commit_blueprint():
-    """Test code for above"""
-    print get_commit_blueprint('bp:pci-passthrough-base')
-    print get_commit_blueprint('bp: pci-passthrough-base')
-    print get_commit_blueprint('blueprint:pci-passthrough-base')
-    print get_commit_blueprint('blueprint: pci-passthrough-base')
-    print get_commit_blueprint('booprint:pci-passthrough-base')
-    print get_commit_blueprint('booprint: pci-passthrough-base')
-
-
-def annotate_blueprints(commits):
-    for c in commits.values():
-        c['blueprint'] = False
-
-    for c in commits.values():
-        if c['on_master_branch']:
-            blueprint = get_commit_blueprint(c['msg'])
-            if blueprint:
-                c['blueprint'] = blueprint
-
-
 def find_blueprint_in_bugs(all_bugs, limit=-1, stats=True):
     result = []
     for bugno, bug in all_bugs.items():
@@ -267,53 +216,6 @@ def find_blueprint_in_bugs(all_bugs, limit=-1, stats=True):
         print '   (', 100.0*float(count)/float(len(all_bugs)), '%)'
 
     return result
-
-
-def parse_git_actor(txt):
-    name = txt.split('"')[1].split('<')[0].strip()
-    email = txt.split('<')[2].split('>')[0].strip()
-    return name, email
-
-
-def author_commiter_same(commit, relaxed=True):
-    if not relaxed:
-        return(commit['author'].lower() == commit['committer'].lower())
-
-    # Relaxed rules - any of below:
-    #  match on email address
-    # match on text name
-    author_name, author_email = parse_git_actor(commit['author'].lower())
-    committer_name, \
-        committer_email = parse_git_actor(commit['committer'].lower())
-    return (author_name == committer_name or author_email == committer_email)
-
-
-RE_CHERRY_TEMPLATE = re.compile('\(cherry picked from commit (([a-f0-9]){40})')
-
-
-def annotate_cherry_pick(commits):
-    for k, c in commits.items():
-        if c['on_master_branch']:
-            # m = RE_CHERRY_TEMPLATE.search(c['msg'])
-            if 'cherry' in c['msg']:
-                m = RE_CHERRY_TEMPLATE.search(c['msg'])
-                if m:
-                    cherry_picked_from = m.group(1)
-                    if cherry_picked_from in commits:
-                        c['cherry_picked_from'] = cherry_picked_from
-                        if 'cherry_picked_to' not in commits[cherry_picked_from]:
-                            commits[cherry_picked_from]['cherry_picked_to'] = []
-                        commits[cherry_picked_from]['cherry_picked_to'].append(k)
-
-
-def annotate_children(commits):
-    for k, c in commits.items():
-        c['children'] = []
-
-    for k, c in commits.items():
-        if c['on_master_branch']:
-            for p in c['parents']:
-                commits[p]['children'].append(k)
 
 
 #
@@ -795,15 +697,6 @@ def build_all_guilt(project, combined_commits,
 
     print 'Determining legacy cut-off'
     legacy_cutoff = find_legacy_cutoff(combined_commits, verbose=True)
-
-    # annotate_blueprints(commits)
-    # foo = find_blueprint_in_bugs(all_bugs, limit=100000)
-    print
-    print 'Determining commit parent/child relationships'
-    annotate_children(combined_commits)
-
-    print 'Identifying cherry-pick commits'
-    annotate_cherry_pick(combined_commits)
 
     print 'Collecting data on commits with bug fixes'
     guilt_data = collect_all_bug_fix_commits(combined_commits,

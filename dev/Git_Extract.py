@@ -94,6 +94,7 @@
 #             by reachability code
 # - 3/4/15  - Added new file suffix to project_to_fname().  Used for
 #             reachable commit data.
+# - 3/5/15 -  Clean-up obsolete code and add new msg annotation code
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
@@ -105,6 +106,7 @@
 #
 #     from GitExtract import extract_master_commit, extract_origin_commit
 #     from GitExtract import get_all_files_from_commit
+#     from Git_Extract import author_commiter_same
 #
 
 from git import *
@@ -159,6 +161,26 @@ def filter_file(fname, filter_config):
         if fname.endswith(suffix):
             return True
     return False
+
+
+def parse_git_actor(txt):
+    name = txt.split('"')[1].split('<')[0].strip()
+    email = txt.split('<')[2].split('>')[0].strip()
+    return name, email
+
+
+def author_commiter_same(commit, relaxed=True):
+    if not relaxed:
+        return(commit['author'].lower() == commit['committer'].lower())
+
+    # Relaxed rules - any of below:
+    #  match on email address
+    # match on text name
+    author_name, author_email = parse_git_actor(commit['author'].lower())
+    committer_name, \
+        committer_email = parse_git_actor(commit['committer'].lower())
+    return (author_name == committer_name or author_email == committer_email)
+
 
 #
 # Parse Commit Messages
@@ -295,6 +317,78 @@ def test_parse_bugs():
         bugs = parse_bugs(test)
         if len(bugs) != 0:
             print bugs, test
+
+
+RE_BLUEPRINT_TEMPLATE1 = re.compile('blueprint:?\s*(\S+)$')
+RE_BLUEPRINT_TEMPLATE2 = re.compile('bp:?\s*(\S+)$')
+
+
+def get_commit_blueprint(msg):
+    blueprint = False
+    if 'blueprint' in msg.lower():
+        for line in msg.lower().splitlines():
+            if 'blueprint' in line:
+                if '//blueprints.launchpad.net' in line:
+                    blueprint = line.split('/')[-1]
+                    return blueprint
+                else:
+                    m = RE_BLUEPRINT_TEMPLATE1.search(line)
+                    if m:
+                        blueprint = m.group(1)
+                        if blueprint.endswith('.'):
+                            blueprint = blueprint[:-1]
+                        return blueprint
+    if 'bp' in msg.lower():
+        for line in msg.lower().splitlines():
+            if 'bp' in line:
+                m = RE_BLUEPRINT_TEMPLATE2.search(line)
+                if m:
+                    blueprint = m.group(1)
+                    if blueprint.endswith('.'):
+                        blueprint = blueprint[:-1]
+                    return blueprint
+    return False
+
+
+def test_get_commit_blueprint():
+    """Test code for above"""
+    print get_commit_blueprint('bp:pci-passthrough-base')
+    print get_commit_blueprint('bp: pci-passthrough-base')
+    print get_commit_blueprint('blueprint:pci-passthrough-base')
+    print get_commit_blueprint('blueprint: pci-passthrough-base')
+    print get_commit_blueprint('booprint:pci-passthrough-base')
+    print get_commit_blueprint('booprint: pci-passthrough-base')
+
+
+def annotate_blueprints(commits):
+    """Parses all commits referencing blueprints"""
+    for c in commits.values():
+        c['blueprint'] = False
+
+    for c in commits.values():
+        if c['on_master_branch']:
+            blueprint = get_commit_blueprint(c['msg'])
+            if blueprint:
+                c['blueprint'] = blueprint
+
+
+RE_CHERRY_TEMPLATE = re.compile('\(cherry picked from commit (([a-f0-9]){40})')
+
+
+def annotate_cherry_pick(commits):
+    """Parses all commit messages containing cherry-pick messages """
+    for k, c in commits.items():
+        if c['on_master_branch']:
+            # m = RE_CHERRY_TEMPLATE.search(c['msg'])
+            if 'cherry' in c['msg']:
+                m = RE_CHERRY_TEMPLATE.search(c['msg'])
+                if m:
+                    picked_from = m.group(1)
+                    if picked_from in commits:
+                        c['cherry_picked_from'] = picked_from
+                        if 'cherry_picked_to' not in commits[picked_from]:
+                            commits[picked_from]['cherry_picked_to'] = []
+                        commits[picked_from]['cherry_picked_to'].append(k)
 
 
 def parse_msg(msg, patch=False):
@@ -564,6 +658,20 @@ def combine_merge_commit(c, commits):
     # c['parents'] = c['parents'][0:1]
 """
 
+#
+# annotation code
+#
+
+
+def annotate_children(commits):
+    for k, c in commits.items():
+        c['children'] = []
+
+    for k, c in commits.items():
+        if c['on_master_branch']:
+            for p in c['parents']:
+                commits[p]['children'].append(k)
+
 
 def annotate_mainline(commits, master_commit, runaway=1000000):
     """Master branch mainline is considered as lineage from Master
@@ -593,6 +701,14 @@ def annotate_mainline(commits, master_commit, runaway=1000000):
             current = False
 
     return commits
+
+
+
+
+
+
+
+
 
 
 def aggregate_merge_bugs_and_changes(commits):
@@ -725,17 +841,23 @@ def build_git_commits(project, update=True, include_patch=False,
     commits = process_commits(repo, commits, get_filter_config(project))
     print
     print 'total commits:', len(commits)
+    """
     if include_patch:
         print 'Augment Git data with patch info'
         commits = update_commits_with_patch_data(commits, project)
         print
+    """
+    print 'Other commit message post-processing'
+    print '  Blueprints'
+    annotate_blueprints(commits)
+    print '  Identifying cherry-pick commits'
+    annotate_cherry_pick(commits)
 
     print 'Consolidate Git Merge related commits'
     commits = consolidate_merge_commits(commits,
                                         get_git_master_commit(repo_name))
 
-    print 'Augment Git data with ordering info'
-    git_annotate_order(commits, repo_name)
+    annotate_children(commits)   # note parent/child relationships
 
     if include_loc:
         print
@@ -906,37 +1028,7 @@ def process_commit_details(cid, repo, repo_name, filter_config):
     return dict(blame)
 
 
-def compute_all_blame(bug_fix_commits, repo, repo_name, filter_config,
-                      start=0, limit=1000000,
-                      keep=set(['lineno', 'orig_lineno', 'commit', 'text'])):
-    """Top level iterator for computing diff & blame for a list of commits"""
-    progress = 0
-    all_blame = []
 
-    for cid in bug_fix_commits[start:start+limit]:
-        all_blame.append(
-            {'cid': cid,
-             'blame': process_commit_details(cid, repo,
-                                             repo_name, filter_config)})
-
-        progress += 1
-        # if progress % 100 == 0:
-        if progress % 10 == 0:
-            print '.',
-        if progress % 1000 == 0:
-            print progress
-
-    return all_blame
-
-
-def prune_huge_blame(entry, threshold=3000):
-    total = 0
-    for fdat in entry['blame'].values():
-        if fdat:
-            x = len(fdat)
-            total += x
-    if total >= threshold:
-        entry['blame'] = {}
 
 
 IMPORTANCE_VALUES = {
@@ -979,151 +1071,16 @@ def filter_bug_fix_commits(v, importance='low+', status='fixed'):
            and v['status'] and v['status'] in status
            )
 
-
-def build_all_blame(project, combined_commits, update=True,
-                    filt=filter_bug_fix_combined_commits):
-    """Top level routine to generate or update blame data
-    Parameters:
-       project - name of project (used as prefix for all files)
-       combined_commits - git-relared data
-       update - determines whether full or incremental rebuild
-       filt - function used to idnetify bugs
-    """
-
-    repo_name = get_repo_name(project)
-    repo = Repo(repo_name)
-    exclude_file_prefix = GET_FILE_EXCLUDE_PREFIXES(project)
-    bug_fix_commits = set([k for k, v in combined_commits.items()
-                           if filt(v)])
-    print 'bug fix commits:', len(bug_fix_commits)
-
-    if update:
-        try:
-            known_blame = set([x['cid'] for x in load_all_blame(project)])
-            new_blame = bug_fix_commits.difference(known_blame)
-            print 'new blame to be computed:', len(new_blame)
-            if len(new_blame) > 0:
-                new_blame = list(new_blame)
-            else:
-                return
-        except Exception:
-            update = False
-
-    if not update:
-        new_blame = list(bug_fix_commits)
-
-    all_blame = compute_all_blame(new_blame, repo, repo_name,
-                                  get_filter_config(project))
-    # prune huge entries
-    for x in all_blame:
-        prune_huge_blame(x)
-
-    print 'saving'
-    if update:
-        all_blame = load_all_blame(project) + all_blame
-
-    jdump(all_blame, project_to_fname(project, blame=True))
-
-
-def load_all_blame(project):
-    """Top level routine to load blame data"""
-    return jload(project_to_fname(project, blame=True))
-
-
 #
 # Routines for extracting additional metadata from Jenkins for Jenkins
 # authored commits
 #
 
+
 def identify_jenkins_commit(commits):
     """Finds commits where Jenkins is author """
     return [c['cid'] for c in commits.values()
             if c and 'jenkins@review.openstack.org' in c['author']]
-
-
-def get_patch_data(cid, project):
-    """Downloads supplementary patch data from OpenStack cgit """
-    # base = 'http://git.openstack.org/cgit/openstack/nova/patch/?id='
-    template = 'http://git.openstack.org/cgit/openstack/{0}/patch/?id={1}'
-    try:
-        # f = urllib2.urlopen(urllib2.Request(base+cid))
-        f = urllib2.urlopen(urllib2.Request(template.format(project, cid)))
-        result = f.read()
-        f.close()
-        return result.split('diff --git')[0]
-    except Exception:
-        return False
-
-
-def load_patch_data(jenkins_commits, project, incremental=True):
-    """Downloads supplementary patch data for a set of commits """
-    name = project_to_fname(project, patches=True)
-    count = 0
-    if incremental:
-        try:
-            patch_data = jload(name)
-        except Exception:
-            patch_data = []
-    else:
-        patch_data = []
-
-    existing_commits = [x['cid'] for x in patch_data]
-    delta_commits = set(jenkins_commits).difference(set(existing_commits))
-    print 'known patches:', len(existing_commits)
-    print 'requested patches:', len(jenkins_commits)
-    print 'new patches to be fetched:', len(delta_commits)
-
-    if len(delta_commits) == 0:
-        return patch_data
-
-    for cid in delta_commits:
-        patch_data.append({'cid': cid, 'patch': get_patch_data(cid, project)})
-
-        count += 1
-        if count % 10 == 0:
-            print '.',
-        if count % 100 == 0:
-            print count,
-        if count % 1000 == 0:
-            pdump(patch_data, name)
-
-    jdump(patch_data, name)
-    return patch_data
-
-
-def update_commits_with_patch_data(commits, project):
-    """Highest level routine - identifies all commits with jenkins author and
-       augments metadata with cgit patch data
-    """
-    name = project_to_fname(project, patches=True)
-    # fetch appropriate data from patches
-    jenkins_commits = identify_jenkins_commit(commits)
-    patch_commits = dict([(x['cid'], parse_msg(x['patch'], patch=True))
-                          for x in load_patch_data(jenkins_commits,
-                                                   project,
-                                                   incremental=True)])
-
-    # merge information into commits
-    for cid in jenkins_commits:
-        patch = patch_commits[cid]
-        c = commits[cid]
-
-        if 'bug' in patch and 'bug' not in c:
-            commits[cid]['bug'] = patch['bug']
-
-        if 'change_id' in patch and 'change_id' not in c:
-            commits[cid]['change_id'] = patch['change_id']
-            pass
-
-        if 'pAuth' in patch:
-            commits[cid]['author2'] = commits[cid]['author']
-            commits[cid]['author'] = patch['pAuth']
-            commits[cid]['committer'] = patch['pAuth']
-
-        if 'pSummary' in patch and 'msg' not in c:
-            commits[cid]['msg'] = patch['pSummary']
-
-    return commits
 
 
 #
@@ -1300,3 +1257,178 @@ def get_all_files_from_commit(cid, repo, filter_config, verbose=False):
     if verbose:
         print 'Total selected files:', len(subset_files)
     return subset_files
+
+
+#
+#
+# Boneyard
+#
+#
+
+
+def _load_all_blame(project):
+    """Top level routine to load blame data"""
+    return jload(project_to_fname(project, blame=True))
+
+
+def _build_all_blame(project, combined_commits, update=True,
+                     filt=filter_bug_fix_combined_commits):
+    """Top level routine to generate or update blame data
+    Parameters:
+       project - name of project (used as prefix for all files)
+       combined_commits - git-relared data
+       update - determines whether full or incremental rebuild
+       filt - function used to idnetify bugs
+    """
+
+    repo_name = get_repo_name(project)
+    repo = Repo(repo_name)
+    exclude_file_prefix = GET_FILE_EXCLUDE_PREFIXES(project)
+    bug_fix_commits = set([k for k, v in combined_commits.items()
+                           if filt(v)])
+    print 'bug fix commits:', len(bug_fix_commits)
+
+    if update:
+        try:
+            known_blame = set([x['cid'] for x in load_all_blame(project)])
+            new_blame = bug_fix_commits.difference(known_blame)
+            print 'new blame to be computed:', len(new_blame)
+            if len(new_blame) > 0:
+                new_blame = list(new_blame)
+            else:
+                return
+        except Exception:
+            update = False
+
+    if not update:
+        new_blame = list(bug_fix_commits)
+
+    all_blame = compute_all_blame(new_blame, repo, repo_name,
+                                  get_filter_config(project))
+    # prune huge entries
+    for x in all_blame:
+        prune_huge_blame(x)
+
+    print 'saving'
+    if update:
+        all_blame = load_all_blame(project) + all_blame
+
+    jdump(all_blame, project_to_fname(project, blame=True))
+
+
+def _compute_all_blame(bug_fix_commits, repo, repo_name, filter_config,
+                       start=0, limit=1000000,
+                       keep=set(['lineno', 'orig_lineno', 'commit', 'text'])):
+    """Top level iterator for computing diff & blame for a list of commits"""
+    progress = 0
+    all_blame = []
+
+    for cid in bug_fix_commits[start:start+limit]:
+        all_blame.append(
+            {'cid': cid,
+             'blame': process_commit_details(cid, repo,
+                                             repo_name, filter_config)})
+
+        progress += 1
+        # if progress % 100 == 0:
+        if progress % 10 == 0:
+            print '.',
+        if progress % 1000 == 0:
+            print progress
+
+    return all_blame
+
+
+def _prune_huge_blame(entry, threshold=3000):
+    total = 0
+    for fdat in entry['blame'].values():
+        if fdat:
+            x = len(fdat)
+            total += x
+    if total >= threshold:
+        entry['blame'] = {}
+
+
+def _get_patch_data(cid, project):
+    """Downloads supplementary patch data from OpenStack cgit """
+    # base = 'http://git.openstack.org/cgit/openstack/nova/patch/?id='
+    template = 'http://git.openstack.org/cgit/openstack/{0}/patch/?id={1}'
+    try:
+        # f = urllib2.urlopen(urllib2.Request(base+cid))
+        f = urllib2.urlopen(urllib2.Request(template.format(project, cid)))
+        result = f.read()
+        f.close()
+        return result.split('diff --git')[0]
+    except Exception:
+        return False
+
+
+def _load_patch_data(jenkins_commits, project, incremental=True):
+    """Downloads supplementary patch data for a set of commits """
+    name = project_to_fname(project, patches=True)
+    count = 0
+    if incremental:
+        try:
+            patch_data = jload(name)
+        except Exception:
+            patch_data = []
+    else:
+        patch_data = []
+
+    existing_commits = [x['cid'] for x in patch_data]
+    delta_commits = set(jenkins_commits).difference(set(existing_commits))
+    print 'known patches:', len(existing_commits)
+    print 'requested patches:', len(jenkins_commits)
+    print 'new patches to be fetched:', len(delta_commits)
+
+    if len(delta_commits) == 0:
+        return patch_data
+
+    for cid in delta_commits:
+        patch_data.append({'cid': cid, 'patch': get_patch_data(cid, project)})
+
+        count += 1
+        if count % 10 == 0:
+            print '.',
+        if count % 100 == 0:
+            print count,
+        if count % 1000 == 0:
+            pdump(patch_data, name)
+
+    jdump(patch_data, name)
+    return patch_data
+
+
+def _update_commits_with_patch_data(commits, project):
+    """Highest level routine - identifies all commits with jenkins author and
+       augments metadata with cgit patch data
+    """
+    name = project_to_fname(project, patches=True)
+    # fetch appropriate data from patches
+    jenkins_commits = identify_jenkins_commit(commits)
+    patch_commits = dict([(x['cid'], parse_msg(x['patch'], patch=True))
+                          for x in load_patch_data(jenkins_commits,
+                                                   project,
+                                                   incremental=True)])
+
+    # merge information into commits
+    for cid in jenkins_commits:
+        patch = patch_commits[cid]
+        c = commits[cid]
+
+        if 'bug' in patch and 'bug' not in c:
+            commits[cid]['bug'] = patch['bug']
+
+        if 'change_id' in patch and 'change_id' not in c:
+            commits[cid]['change_id'] = patch['change_id']
+            pass
+
+        if 'pAuth' in patch:
+            commits[cid]['author2'] = commits[cid]['author']
+            commits[cid]['author'] = patch['pAuth']
+            commits[cid]['committer'] = patch['pAuth']
+
+        if 'pSummary' in patch and 'msg' not in c:
+            commits[cid]['msg'] = patch['pSummary']
+
+    return commits

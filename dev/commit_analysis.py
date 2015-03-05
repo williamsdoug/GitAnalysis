@@ -70,7 +70,7 @@ from GerritDownload import build_gerrit_data
 from GerritDownload import load_gerrit_changes, load_gerrit_change_details
 
 from Git_Extract import build_git_commits, load_git_commits
-from Git_Extract import build_all_blame, load_all_blame
+# from Git_Extract import build_all_blame, load_all_blame
 from Git_Extract import filter_bug_fix_combined_commits
 from Git_Extract import project_to_fname
 from jp_load_dump import convert_to_builtin_type, jload, jdump
@@ -112,15 +112,16 @@ def load_core_analysis_data(project):
     combined_commits = load_combined_commits(project)
     print 'combined_commits:', len(combined_commits)
 
-    all_blame = load_all_blame(project)
-    print 'all blame:', len(all_blame)
+    # all_blame = load_all_blame(project)
+    # print 'all blame:', len(all_blame)
 
-    return combined_commits, all_blame
+    # return combined_commits, all_blame
+    return combined_commits
 
 
 def load_all_analysis_data(project):
     """ Loads downloaded_bugs, all_changes, all_change_details,
-        commits, combined_commits and all_blame.
+        commits and combined_commits.
     """
     print 'loading bug data'
     downloaded_bugs = load_lp_bugs(project)
@@ -138,19 +139,24 @@ def load_all_analysis_data(project):
     combined_commits = load_combined_commits(project)
     print 'combined_commits:', len(combined_commits)
 
+    """
     try:
         all_blame = load_all_blame(project)
         print 'all blame:', len(all_blame)
     except Exception:
         print 'Error:  Unable to load blame data'
         all_blame = False
-
     return downloaded_bugs, all_changes, all_change_details, \
         commits, combined_commits, all_blame
+    """
+
+    return downloaded_bugs, all_changes, all_change_details, \
+        commits, combined_commits
 
 
 def rebuild_all_analysis_data(project, update=True,
-                              download=True, blame=False,
+                              download=True,
+                              build_blame=False,
                               build_launchpad=True,
                               build_gerrit=True,
                               build_git=True,
@@ -182,11 +188,14 @@ def rebuild_all_analysis_data(project, update=True,
         print 'Build combined_commits by joining with bugs and gerrit data'
         combined_commits = join_all(project)
 
-    if blame:
+    #  Needs to be updated
+    """
+    if build_blame:
         print
         print 'Building all blame'
         combined_commits = load_combined_commits(project)
         build_all_blame(project, combined_commits, update=update)
+    """
 
 #
 # Join related routines
@@ -272,15 +281,16 @@ def join_with_gerrit(project, commits, all_changes, all_change_details):
 # Routines for post-processing Dataset
 #
 
-
+"""
 def trim_entries(combined_commits, all_blame):
-    """Returns order range (min, max) based on first and list
+    Returns order range (min, max) based on first and list
     bug fix commit. First entry is after first bug fix.
-    """
+
     buglist = [(combined_commits[be['cid']]['order'], be['cid'])
                for be in all_blame]
     buglist = sorted(buglist, key=lambda x: x[0])
     return buglist[0][0] + 1, buglist[-1][0]
+"""
 
 
 RE_AUTH = re.compile('<(\S+@\S+)>')
@@ -394,13 +404,14 @@ def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
 def extract_features_helper(combined_commits, all_blame,
                             min_order, max_order,
                             offset, limit):
-
+    """
     if not min_order and not max_order:
         min_order, max_order = trim_entries(combined_commits, all_blame)
     elif not min_order:
         min_order, _ = trim_entries(combined_commits, all_blame)
     elif not max_order:
         _, max_order = trim_entries(combined_commits, all_blame)
+    """
 
     order_range = max_order - min_order
 
