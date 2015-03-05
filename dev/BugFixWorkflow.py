@@ -814,7 +814,7 @@ def identify_reachable_commits(project, commits, legacy_cutoff=0,
             if sampling_freq != reachable_cache['sampling_freq']:
                 print '****Reachable cache sampling frequency mis-match'
                 raise Exception
-            print '    Loaded cached reachability data'
+            print '  Loaded cached reachability data'
 
     except Exception:
         print 'Failed to load reachability data'

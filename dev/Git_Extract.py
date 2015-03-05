@@ -1,5 +1,5 @@
 #
-# Git_Extract_Join.py - Code to extract Git commit data, metadata, diff
+# Git_Extract.py - Code to extract Git commit data, metadata, diff
 #                       and blame.
 #
 # Author:  Doug Williams - Copyright 2014, 2015

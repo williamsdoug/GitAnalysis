@@ -5,7 +5,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 2/20/2014
+# Last updated 3/5/2015
 #
 # History:
 # - 9/2/14:  Initial version (initially contained in NovaSampleData).
@@ -35,6 +35,7 @@
 #             handling when loading all_blame
 # - 2/26/15 - Clean-up handling of change_id
 # - 3/3/15  - Added additional options to rebuild_all_analysis_data()
+# - 3/5/15  - Updated feature extraction to reflect new schema
 
 #
 # Top Level Routines:
@@ -79,10 +80,36 @@ from jp_load_dump import convert_to_builtin_type, jload, jdump
 # import sys
 # from jp_load_dump import jload
 
+#
+# Global Data (constants)
+#
+global BUG_SEVERITY_VALUES
+global BUG_PRECEDENCE_VALUES
+
+BUG_SEVERITY_VALUES = {
+    'Critical': 4,
+    'High': 3,
+    'Medium': 2,
+    'Low': 1,
+    'Wishlist': 0,
+    'Unknown': 0,
+    'Undecided': 0,
+}
+
+BUG_PRECEDENCE_VALUES = {
+    'Critical': 6,
+    'High': 5,
+    'Medium': 4,
+    'Low': 3,
+    'Wishlist': 2,
+    'Unknown': 1,
+    'Undecided': 0,
+}
 
 #
 # Routines to consistency check Git, Gerrit and Lanuchpad Data
 #
+
 
 def verify_missing_bugs(project):
     """Make sure all bugs references in commits have been downloaded,
@@ -255,7 +282,7 @@ def join_with_gerrit(project, commits, all_changes, all_change_details):
                                        and c['status'] == 'MERGED'])
 
     for cid, c in commits.items():
-        c['change_details'] = []
+        c['change_details'] = False
         if 'change_id' in c:                # Join on chage_id
             change_id = c['change_id']
             if (change_id in change_by_changeid
@@ -269,17 +296,6 @@ def join_with_gerrit(project, commits, all_changes, all_change_details):
 #
 # Routines for post-processing Dataset
 #
-
-"""
-def trim_entries(combined_commits, all_blame):
-    Returns order range (min, max) based on first and list
-    bug fix commit. First entry is after first bug fix.
-
-    buglist = [(combined_commits[be['cid']]['order'], be['cid'])
-               for be in all_blame]
-    buglist = sorted(buglist, key=lambda x: x[0])
-    return buglist[0][0] + 1, buglist[-1][0]
-"""
 
 
 RE_AUTH = re.compile('<(\S+@\S+)>')
@@ -304,13 +320,14 @@ def parse_author_and_org(auth):
     return author_name, author_org
 
 
-def create_feature(c):
-    """Extract features from combined_commits entry"""
-    label = c['guilt']
-    cid = c['cid']
-
-    feats = {}
-    # feats['order'] = math.log(c['order'])
+def add_commit_features(c, feats,
+                        include_committer=True,
+                        include_order=True,
+                        include_files=True,
+                        include_lines_of_code=True,
+                        include_blueprint=True,
+                        include_cherrypick=True,):
+    """Extract informaton related to Git Commit"""
 
     # General information about author
     author_name, author_org = parse_author_and_org(c['author'])
@@ -318,45 +335,133 @@ def create_feature(c):
     feats['author_org'] = author_org
     feats['author_order'] = math.log(c['author_order'])
 
-    # if this commit associated with a bug fix itself
-    feats['is_bug_fix'] = 'lp:id' in c
+    # Information about committer
+    if not include_committer:
+        pass
+    elif c['author'] != c['committer']:
+        committer_name, _ = parse_author_and_org(c['committer'])
+        feats['committer'] = committer_name
+    else:
+        feats['committer'] = 'same'
+
+    if include_order:
+        feats['order'] = math.log(c['order'])
 
     # General information around change (size (loc), code maturity,
     # prior bugs in module)
-    for fname in c['files']:
-        feats[fname] = 1
-    if c['file_order']:
-        feats['min_file_order'] = math.log(min([v for v
-                                                in c['file_order'].values()]))
-        feats['max_file_order'] = math.log(max([v for v
-                                                in c['file_order'].values()]))
+    if include_files:
+        for fname in c['files']:
+            feats[fname] = 1
 
-    # Information about committer, approver and reviewers
-    committer_name, _ = parse_author_and_org(c['committer'])
-    feats['committer'] = committer_name
+            if include_order and c['file_order']:
+                feats['min_file_order'] = \
+                    math.log(min([v for v in c['file_order'].values()]))
+                feats['max_file_order'] = \
+                    math.log(max([v for v in c['file_order'].values()]))
 
     # Information about code changes
-    feats['loc_add'] = c['loc_add']
-    feats['loc_change'] = c['loc_change']
-    for fname, detail in c['loc_detail']. items():
-        feats['loc_add_' + fname] = detail['add']
-        feats['loc_changes_' + fname] = detail['changes']
+    if include_lines_of_code:
+        feats['loc_add'] = c['loc_add']
+        feats['loc_change'] = c['loc_change']
+        if include_files:
+            for fname, detail in c['loc_detail'].items():
+                feats['loc_add_' + fname] = detail['add']
+                feats['loc_changes_' + fname] = detail['changes']
 
-    if 'g:labels' in c:
-        feats['approved'] = c['g:labels']['Code-Review']['approved']['name']
-        for r in c['g:labels']['Code-Review']['all']:
-            feats['reviewer' + r['name']] = r['value']
+    if include_blueprint:
+        feats['blueprint'] = 'blueprint' in c
 
-        feats['votes'] = sum([r['value'] for r
-                              in c['g:labels']['Code-Review']['all']])
+    if include_cherrypick:
+        feats['cherry_picked_to'] = 'cherry_picked_to' in c
+        feats['cherry_picked_from'] = 'cherry_picked_from' in c
+    return
 
-    if 'g:messages' in c and c['g:messages']:
-        feats['revision'] = max([msg['_revision_number']
-                                 for msg in c['g:messages']
-                                 if '_revision_number' in msg])
 
-    if 'lp:message_count' in c:
-        feats['lp_messages'] = c['lp:message_count']
+def add_bug_features(c, feats):
+    """Extract information related to information in Launchpad"""
+    global BUG_SEVERITY_VALUES
+    global BUG_PRECEDENCE_VALUES
+    bug_details = c['bug_details']  # list of bugs
+
+    feats['lauchpad_bugs'] = len(bug_details)
+    if len(bug_details) == 0:
+        return
+
+    # if this commit associated with a bug fix itself
+    # feats['is_bug_fix'] = 'lp:id' in c
+
+    feats['lauchpad_heat'] = max([bug['heat']
+                                  for bug in bug_details.values()])
+    feats['lauchpad_severity'] = max([BUG_SEVERITY_VALUES[bug['importance']]
+                                      for bug in bug_details.values()
+                                      if bug['importance']] + [0])
+    feats['lauchpad_precedence'] = \
+        max([BUG_PRECEDENCE_VALUES[bug['importance']]
+             for bug in bug_details.values() if bug['importance']] + [0])
+    feats['lauchpad_messages'] = \
+        sum([len(bug['messages']) for bug in bug_details.values()])
+    feats['lauchpad_security_related'] = \
+        sum([1 for bug in bug_details.values()
+             if bug['security_related']]) > 0
+    feats['lauchpad_cve'] = sum([len(bug['cves'])
+                                 for bug in bug_details.values()])
+    return
+
+
+def add_gerrit_features(c, feats, include_gerrit_details=True):
+    """Extract features related to Gerrit history"""
+    change_details = c['change_details']  # list of bugs
+    if not change_details:
+        feats['gerrit_has_data'] = False
+        return
+    feats['gerrit_has_data'] = True
+    max_revision = max([message['_revision_number']
+                        for message in change_details['messages']
+                        if '_revision_number' in message])
+    feats['gerrit_revision'] = max_revision
+
+    if not include_gerrit_details:
+        return
+
+    if 'Workflow' in change_details['labels']:
+        feats['gerrit_approved_workflow'] = \
+            change_details['labels']['Workflow']['approved']['name']
+    feats['gerrit_approved_code'] = \
+        change_details['labels']['Code-Review']['approved']['name']
+    feats['gerrit_votes'] = \
+        sum([review['value'] for review
+             in change_details['labels']['Code-Review']['all']])
+    for review in change_details['labels']['Code-Review']['all']:
+            feats['gerrit_reviewer_' + review['name']] = review['value']
+    return
+
+
+def create_feature(c,
+                   include_committer=True,
+                   include_order=True,
+                   include_files=True,
+                   include_lines_of_code=False,
+                   include_blueprint=True,
+                   include_cherrypick=True,
+                   include_bug=True,
+                   include_gerrit=True,
+                   include_gerrit_details=True):
+    """Extract features from combined_commits entry"""
+    label = c['guilt']
+    cid = c['cid']
+
+    feats = {}
+    add_commit_features(c, feats,
+                        include_committer,
+                        include_order,
+                        include_files,
+                        include_lines_of_code,
+                        include_blueprint,
+                        include_cherrypick)
+    if include_bug:
+        add_bug_features(c, feats)
+    if include_gerrit:
+        add_gerrit_features(c, feats, include_gerrit_details)
 
     return cid, label, feats
 
