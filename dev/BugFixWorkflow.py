@@ -27,6 +27,7 @@
 #           bug workflow.
 # - 3/6/15: Compute order range for non-legacy commits.
 # - 3/6/15: Move find_legacy_cutoff to Git_Extract
+# - 3/6/15: Addes support for blame weighted by bug importance
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -34,8 +35,6 @@
 # from BugFixWorkflow import annotate_guilt
 # from BugFixWorkflow import annotate_commit_reachability
 # from BugFixWorkflow import commit_postprocessing
-
-
 
 import pprint as pp
 import re
@@ -75,7 +74,7 @@ ALL_BUGS = False
 
 from Git_Extract import IMPORTANCE_VALUES, STATUS_VALUES
 
-BUG_WEIGHT_VALUES = {
+BUG_WEIGHT_VALUES = {   # indexed by launchpad importance values
     'Critical': 4,
     'High': 3,
     'Medium': 2,
@@ -83,6 +82,14 @@ BUG_WEIGHT_VALUES = {
     'Wishlist': 0,
     'Unknown': 0,
     'Undecided': 0,
+}
+
+IMPORTANCE_BASE_LEVEL = {
+    'crit': 3,
+    'high+': 2,
+    'med+': 1,
+    'low+': 0,
+    'all': -1,
 }
 
 
@@ -112,20 +119,16 @@ def filter_bug(bugno, importance='low+', status='fixed', heat=-1):
 
     if bugno not in ALL_BUGS:
         return False
-
     bug = ALL_BUGS[bugno]
 
     importance_values = IMPORTANCE_VALUES[importance]
     status_values = STATUS_VALUES[status]
     if not bug['status'] or bug['status'] not in status_values:
             return False
-
     if bug['importance'] and bug['importance'] in importance_values:
             return True
-
     if heat > 0 and int(bug['heat']) >= heat:
             return True
-
     return False
 
 
@@ -139,8 +142,38 @@ def is_bug_fix(c, importance='low+', status='fixed', heat=-1):
     if 'bug_details' not in c or len(c['bug_details']) == 0:
         return False
 
-    return [len(filter_bugs(c['bug_details'].keys(),
-            importance, status, heat=-1)) > 0]
+    return len(filter_bugs(c['bug_details'].keys(),
+               importance, status, heat=-1)) > 0
+
+
+def get_bug_fix_weight(bugs, importance, scaling='linear'):
+    """Computes weight for bug based on bug importance value
+       Scaling options:
+       - flat - no scaling,
+       - Linear
+       - exp - expressed as number
+      """
+    global BUG_WEIGHT_VALUES
+    global IMPORTANCE_BASE_LEVEL
+    global ALL_BUGS
+
+    bug_importance = [ALL_BUGS[bugno]['importance']
+                      for bugno in bugs if bugno in ALL_BUGS]
+    raw_weight = max([BUG_WEIGHT_VALUES[ALL_BUGS[bugno]['importance']]
+                      for bugno in bugs if bugno in ALL_BUGS])
+    norm_weight = max(raw_weight - IMPORTANCE_BASE_LEVEL[importance], 0)
+
+    if scaling == 'flat':
+        return min(norm_weight, 1)
+    elif scaling == 'linear':
+        return norm_weight
+    elif scaling == 'exp':
+        return 2.0**((norm_weight - 1) / 2.0)
+    elif type(scaling) in [int, float]:
+        return float(scaling)**(norm_weight - 1.0)
+    else:
+        print 'get_bug_fix_weight: Invalid scaling value'
+        raise Exception
 
 
 #
@@ -223,36 +256,38 @@ def process_ffc_bug_fix(c, importance, verbose=False):
         print 'FFC Bug Fix:', c['cid']
     diff_commit = c['cid']
     blame_commit = c['parents'][0]
-
-    relevant_bugs = []  # NEED TO COMPUTE
+    bugs = filter_bugs(c['bug_details'].keys(), importance)
 
     return {'cid': diff_commit, 'diff_commit': diff_commit,
             'blame_commit': blame_commit,
-            'bugs': filter_bugs(c['bug_details'].keys(), importance),
-            'type': 'fast_forward', 'merge_commit': c['cid']}
+            'bugs': bugs,
+            'type': 'fast_forward', 'merge_commit': c['cid'],
+            'weight': get_bug_fix_weight(bugs, importance)}
 
 
-def process_simple_merge_bug_fix(c, commits, sub_branch_data,
+def process_simple_merge_bug_fix(c, importance, commits, sub_branch_data,
                                  verbose=False, runaway=100000):
     diff_commit = c['parents'][1]
     blame_commit = c['parents'][1]  # find first ancestor on mainline
     while runaway > 0 and not commits[blame_commit]['on_mainline']:
         blame_commit = commits[blame_commit]['parents'][0]
         runaway -= 1
+    bugs = sub_branch_data['unique_bugs']
 
     if verbose:
         print 'Simple Merge Bug Fix:', c['cid']
-        print '    ', sub_branch_data['unique_bugs']
+        print '    ', bugs
         print '  cid for blame:', blame_commit
 
     return {'cid': diff_commit, 'diff_commit': diff_commit,
             'blame_commit': blame_commit,
-            'bugs': sub_branch_data['unique_bugs'],
-            'type': 'simple_merge', 'merge_commit': c['cid']}
-    pass
+            'bugs': bugs,
+            'type': 'simple_merge', 'merge_commit': c['cid'],
+            'weight': get_bug_fix_weight(bugs, importance)}
 
 
-def process_complex_merge_bug_fix(c, commits, sub_branch_data, verbose=False):
+def process_complex_merge_bug_fix(c, importance, commits,
+                                  sub_branch_data, verbose=False):
     if verbose:
         print 'Complex Merge Bug Fix:', c['cid']
 
@@ -280,7 +315,9 @@ def process_complex_merge_bug_fix(c, commits, sub_branch_data, verbose=False):
                                 'blame_commit': blame_commit,
                                 'bugs': relevant_bugs,
                                 'type': 'complex_merge_1',
-                                'merge_commit': c['cid']})
+                                'merge_commit': c['cid'],
+                                'weight': get_bug_fix_weight(relevant_bugs,
+                                                             importance)})
                 if False:
                     print '   Diff:', diff_commit
                     print '  Blame:', blame_commit
@@ -298,7 +335,9 @@ def process_complex_merge_bug_fix(c, commits, sub_branch_data, verbose=False):
                                 'blame_commit': blame_commit,
                                 'bugs': relevant_bugs,
                                 'type': 'complex_merge_2',
-                                'merge_commit': c['cid']})
+                                'merge_commit': c['cid'],
+                                'weight': get_bug_fix_weight(relevant_bugs,
+                                                             importance)})
                 if False:
                     print '   Diff:', diff_commit
                     print '  Blame:', blame_commit
@@ -325,7 +364,9 @@ def process_complex_merge_bug_fix(c, commits, sub_branch_data, verbose=False):
                                 'blame_commit': blame_commit,
                                 'bugs': relevant_bugs,
                                 'type': 'complex_merge_3',
-                                'merge_commit': c['cid']})
+                                'merge_commit': c['cid'],
+                                'weight': get_bug_fix_weight(relevant_bugs,
+                                                             importance)})
                 if False:
                     print '   Diff:', diff_commit
                     print '  Blame:', blame_commit
@@ -392,11 +433,11 @@ def get_sub_branch_data(commits, k, importance='low+', depth=1,
             dedupe_list(commits_with_changes), max_parents, max_depth]
 
 
-def get_all_branch_data(commits, importance='low+', limit=-1):
+def get_all_branch_data(commits, importance, limit=-1):
     sub_branch_data = {}
     for k, c in commits.items():
-        if (c['on_master_branch'] and c['on_mainline'] and
-            len(c['parents']) > 1):
+        if (c['on_master_branch'] and c['on_mainline']
+            and len(c['parents']) > 1):
                 authors, committers, bugs, changes, \
                     commits_with_changes, parents, \
                     depth = get_sub_branch_data(commits, c['parents'][1],
@@ -435,7 +476,7 @@ def collect_all_bug_fix_commits(commits, importance,
 
     guilt_data = []
 
-    all_sub_branches = get_all_branch_data(commits, importance=importance)
+    all_sub_branches = get_all_branch_data(commits, importance)
     for k, c in commits.items():
         # Identified commit to be included during feature extraction
         c['is_tracked_change'] = False
@@ -487,11 +528,6 @@ def collect_all_bug_fix_commits(commits, importance,
                 if len(sub_branch_data['unique_bugs']) == 0:
                     print '   Ignoring sub-branch'
                     continue
-            """
-            if c['date'] > legacy_cutoff:
-                assert(len(sub_branch_data['unique_changes']) > 0)
-                    # changes must always have change_id
-            """
 
             # Simple merge commit
             if len(sub_branch_data['unique_changes']) == 1:
@@ -517,12 +553,18 @@ def collect_all_bug_fix_commits(commits, importance,
 
                 process_simple_merge_change(c, commits)
                 if len(sub_branch_data['unique_bugs']) > 0:
-                    guilt_data.append(process_simple_merge_bug_fix(c, commits, sub_branch_data))
+                    entry = process_simple_merge_bug_fix(c, importance,
+                                                         commits,
+                                                         sub_branch_data)
+                    guilt_data.append(entry)
                 pass
             else:
                 process_complex_merge_change(c, commits)
                 if len(sub_branch_data['unique_bugs']) > 0:
-                    guilt_data += process_complex_merge_bug_fix(c, commits, sub_branch_data)
+                    entry = process_complex_merge_bug_fix(c, importance,
+                                                          commits,
+                                                          sub_branch_data)
+                    guilt_data += entry
                 pass
 
         pass
@@ -646,7 +688,7 @@ def annotate_guilt(guilt_data, commits, limit=-1):
             break
 
         for commit_key, guilt in blame_compute_normalized_guilt(entry).items():
-            commits[commit_key]['guilt'] += guilt
+            commits[commit_key]['guilt'] += guilt * entry['weight']
 
 
 def build_all_guilt(project, combined_commits,
@@ -707,7 +749,7 @@ def commit_postprocessing(project, importance='low+',
     prune_empty_commits(combined_commits, legacy_cutoff)
     git_annotate_order(combined_commits, get_repo_name(project))
     min_order, max_order = get_commit_ordering_min_max(combined_commits)
-    print 'Order ranage for non-legacy comits'
+    print 'Order range for non-legacy comits'
     print '  min:', min_order
     print '  max:', max_order
     return combined_commits
