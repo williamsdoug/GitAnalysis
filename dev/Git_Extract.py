@@ -95,6 +95,10 @@
 # - 3/4/15  - Added new file suffix to project_to_fname().  Used for
 #             reachable commit data.
 # - 3/5/15 -  Clean-up obsolete code and add new msg annotation code
+# - 3/6/15 -  Compute order range for non-legacy commits.
+# - 3/6/15 -  Moved find_legacy_cutoff from BugFixWorkflow to Git_Extract
+#             to avoid circular import dependencies
+#
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
@@ -102,11 +106,18 @@
 #
 #    from Git_Extract import get_git_master_commit, get_authors_and_files
 #    from Git_Extract import filter_bug_fix_commits
-#    from Git_Extract import  filter_bug_fix_combined_commits
+#    from Git_Extract import filter_bug_fix_combined_commits
 #
-#     from GitExtract import extract_master_commit, extract_origin_commit
-#     from GitExtract import get_all_files_from_commit
+#     from Git_Extract import extract_master_commit, extract_origin_commit
+#     from Git_Extract import get_all_files_from_commit
 #     from Git_Extract import author_commiter_same
+#
+#     from Git_Extract import assign_blame, get_blame
+#     from Git_Extract import project_to_fname
+#     from Git_Extract import process_commit_files_unfiltered, filter_file
+#     from Git_Extract import git_annotate_order
+#     from Git_Extract import get_commit_ordering_min_max
+#     from Git_Extract import find_legacy_cutoff
 #
 
 from git import *
@@ -117,6 +128,9 @@ import collections
 from collections import defaultdict
 import re
 import urllib2
+import datetime
+from datetime import date
+from datetime import datetime as dt
 
 from jp_load_dump import convert_to_builtin_type, pload, pdump, jload, jdump
 from subprocess import Popen, PIPE, STDOUT
@@ -948,8 +962,74 @@ def identify_jenkins_commit(commits):
 
 
 #
+# Determine date threshold for non-legacy commits
+# Legacy commits are considerered commits propr to incorporation of
+# Gerrit into tools chain -- ignored due tom complexity of extracting
+# valid data from these commits since no Change_Id field in commit message.
+#
+
+def find_legacy_cutoff(commits, verbose=False):
+    """Identifies commit timstamp for cut-over from legacy change
+    tracking to use of Gerrit
+    """
+    last_without = False
+    last_without_date = 0
+    first_with = False
+    first_with_date = 2e9
+
+    for k, c in commits.items():
+            if c['on_master_branch'] and c['on_mainline']:
+                commit_date = int(c['date'])
+                if ('review@openstack.org' in c['committer'] or
+                    'openstack-infra@' in c['committer'] or
+                    'change_id' in c and c['change_id']):
+                        # print 'Test 1'
+                        if commit_date < first_with_date:
+                            first_with_date = commit_date
+                            first_with = k
+                else:
+                    if commit_date > last_without_date:
+                        last_without_date = commit_date
+                        last_without = k
+
+    # sanity check results
+    if False:
+        print '  First_with:', first_with
+        print '  Last_without:', last_without
+
+    transition_delta = (commits[first_with]['date']
+                        - commits[last_without]['date'])
+    if transition_delta > 0:
+        if verbose:
+            print '  Transition interval:',
+            print str(datetime.timedelta(seconds=int(transition_delta)))
+            print '  Parent of first_with:', commits[first_with]['parents'][0]
+        assert(commits[first_with]['parents'][0] == last_without)
+        if verbose:
+            print '  Setting cutoff to:',
+            print dt.fromtimestamp(first_with_date - 1).strftime("%d/%m/%Y")
+        return first_with_date - 1
+    else:
+        if verbose:
+            print '  Warning: Transition Overlap:',
+            print str(datetime.timedelta(seconds=int(-transition_delta)))
+            print '  Setting cutoff to:',
+            print dt.fromtimestamp(last_without_date).strftime("%d/%m/%Y")
+        return last_without_date
+
+#
 # Routines to annotate commits by order of change
 #
+
+def get_commit_ordering_min_max(commits):
+    """Compute range of non-legacy ordered commits"""
+    legacy_cutoff = find_legacy_cutoff(commits)
+    all_orders = [c['order'] for c in commits.values()
+                  if c['reachable'] and c['date'] > legacy_cutoff]
+    min_order = min(all_orders)
+    max_order = max(all_orders)
+    return min_order, max_order
+
 
 def git_annotate_commit_order(commits):
     """Asserts global ordering of commits based on commit date"""

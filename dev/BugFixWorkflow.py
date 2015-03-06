@@ -25,6 +25,8 @@
 # - 3/5/15: add prune_empty_commits()
 # - 3/5/15: New top-level routine commit_postprocessing() implementing overall
 #           bug workflow.
+# - 3/6/15: Compute order range for non-legacy commits.
+# - 3/6/15: Move find_legacy_cutoff to Git_Extract
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -32,6 +34,7 @@
 # from BugFixWorkflow import annotate_guilt
 # from BugFixWorkflow import annotate_commit_reachability
 # from BugFixWorkflow import commit_postprocessing
+
 
 
 import pprint as pp
@@ -51,6 +54,8 @@ from Git_Extract import extract_master_commit
 from Git_Extract import get_all_files_from_commit
 from Git_Extract import author_commiter_same
 from Git_Extract import git_annotate_order
+from Git_Extract import get_commit_ordering_min_max
+from Git_Extract import find_legacy_cutoff
 
 from jp_load_dump import jload, jdump
 from jp_load_dump import pload, pdump
@@ -85,65 +90,14 @@ BUG_WEIGHT_VALUES = {
 # Code
 #
 
-
 def dedupe_list(x):
     "Deduplicates list"
     return list(set(x))
 
-
-def find_legacy_cutoff(commits, verbose=False):
-    """Identifies commit timstamp for cut-over from legacy change
-    tracking to use of Gerrit
-    """
-    last_without = False
-    last_without_date = 0
-    first_with = False
-    first_with_date = 2e9
-
-    for k, c in commits.items():
-            if c['on_master_branch'] and c['on_mainline']:
-                commit_date = int(c['date'])
-                if ('review@openstack.org' in c['committer'] or
-                    'openstack-infra@' in c['committer'] or
-                    'change_id' in c and c['change_id']):
-                        # print 'Test 1'
-                        if commit_date < first_with_date:
-                            first_with_date = commit_date
-                            first_with = k
-                else:
-                    if commit_date > last_without_date:
-                        last_without_date = commit_date
-                        last_without = k
-
-    # sanity check results
-    if False:
-        print '  First_with:', first_with
-        print '  Last_without:', last_without
-
-    transition_delta = (commits[first_with]['date']
-                        - commits[last_without]['date'])
-    if transition_delta > 0:
-        if verbose:
-            print '  Transition interval:',
-            print str(datetime.timedelta(seconds=int(transition_delta)))
-            print '  Parent of first_with:', commits[first_with]['parents'][0]
-        assert(commits[first_with]['parents'][0] == last_without)
-        if verbose:
-            print '  Setting cutoff to:',
-            print datetime.datetime.fromtimestamp(first_with_date - 1).strftime("%d/%m/%Y")
-        return first_with_date - 1
-    else:
-        if verbose:
-            print '  Warning: Transition Overlap:',
-            print str(datetime.timedelta(seconds=int(-transition_delta)))
-            print '  Setting cutoff to:',
-            print datetime.datetime.fromtimestamp(last_without_date).strftime("%d/%m/%Y")
-        return last_without_date
-
-
 #
 # Bug Filtering (based on importance)
 #
+
 
 def import_all_bugs(all_bugs):
     """Hack to import bug data into namespace for use by filter routines"""
@@ -752,6 +706,10 @@ def commit_postprocessing(project, importance='low+',
     annotate_commit_reachability(project, combined_commits)
     prune_empty_commits(combined_commits, legacy_cutoff)
     git_annotate_order(combined_commits, get_repo_name(project))
+    min_order, max_order = get_commit_ordering_min_max(combined_commits)
+    print 'Order ranage for non-legacy comits'
+    print '  min:', min_order
+    print '  max:', max_order
     return combined_commits
 
 #
