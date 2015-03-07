@@ -28,6 +28,8 @@
 # - 3/6/15: Compute order range for non-legacy commits.
 # - 3/6/15: Move find_legacy_cutoff to Git_Extract
 # - 3/6/15: Addes support for blame weighted by bug importance
+# - 3/7/15: Mark selected bug fixe commits for future bug fix calculation.
+#           mark_selected_bug_fix_commits(), compute_selected_bug_fixes()
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -35,6 +37,7 @@
 # from BugFixWorkflow import annotate_guilt
 # from BugFixWorkflow import annotate_commit_reachability
 # from BugFixWorkflow import commit_postprocessing
+# from BugFixWorkflow import compute_selected_bug_fixes
 
 import pprint as pp
 import re
@@ -691,6 +694,47 @@ def annotate_guilt(guilt_data, commits, limit=-1):
             commits[commit_key]['guilt'] += guilt * entry['weight']
 
 
+def mark_selected_bug_fix_commits(guilt_data, commits):
+    """Mark selected bug fix commits based on guilt data entries
+       ignores empty bug fixes"""
+    for k, c in commits.items():    # clear field prior to use
+        if 'tagged_bug_fix' in c:
+            del commits[k]['tagged_bug_fix']
+    for entry in guilt_data:
+        if entry['blame']:
+            commits[entry['diff_commit']]['tagged_bug_fix'] = True
+
+
+def compute_selected_bug_fixes(commits, min_order=False, max_order=False,
+                               legacy_cutoff=0):
+    """Counts bug fixes within selected window"""
+    if min_order or max_order:
+        order_to_time = dict([[c['order'], c['date']]
+                              for c in commits.values() if 'order' in c])
+
+    if min_order:
+        if min_order in order_to_time:
+            min_time = order_to_time[min_order]
+        else:
+            min_time = 0
+    else:
+        min_time = 0
+    min_time = max(min_time, legacy_cutoff)
+
+    if max_order:
+        if max_order in order_to_time:
+            max_time = order_to_time[max_order]
+        else:
+            max_time = max(order_to_time.values())
+    else:
+        max_time = max([c['date'] for c in commits.values()])
+
+    return len([k for k, c in commits.items()
+                if 'tagged_bug_fix' in c
+                and c['date'] >= min_time
+                and c['date'] <= max_time])
+
+
 def build_all_guilt(project, combined_commits,
                     clear_cache=False, apply_guilt=True,
                     importance='low+'):
@@ -718,6 +762,7 @@ def build_all_guilt(project, combined_commits,
     if apply_guilt:
         print 'Annotating Guilt'
         annotate_guilt(guilt_data, combined_commits)
+    mark_selected_bug_fix_commits(guilt_data, combined_commits)
     return guilt_data
 
 

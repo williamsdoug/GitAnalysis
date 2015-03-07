@@ -906,9 +906,6 @@ def process_commit_details(cid, repo, repo_name, filter_config):
     return dict(blame)
 
 
-
-
-
 IMPORTANCE_VALUES = {
     'crit': ['Critical'],
     'high+': ['Critical', 'High'],
@@ -1020,6 +1017,7 @@ def find_legacy_cutoff(commits, verbose=False):
 #
 # Routines to annotate commits by order of change
 #
+
 
 def get_commit_ordering_min_max(commits):
     """Compute range of non-legacy ordered commits"""
