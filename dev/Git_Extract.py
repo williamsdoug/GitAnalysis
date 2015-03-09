@@ -98,6 +98,8 @@
 # - 3/6/15 -  Compute order range for non-legacy commits.
 # - 3/6/15 -  Moved find_legacy_cutoff from BugFixWorkflow to Git_Extract
 #             to avoid circular import dependencies
+# - 3/6/15 -  Updated annotate_commit_loc() to align with orther global changes
+# - 3/9/15 - Added caching support to LOC computation
 #
 #
 # Top Level Routines:
@@ -153,7 +155,7 @@ INSANELY_HUGE_BRANCH_DISTANCE = 1000000000
 
 
 def project_to_fname(project, patches=False, combined=False,
-                     blame=False, reachable=False):
+                     blame=False, reachable=False, loc=False):
     prefix = get_corpus_dir(project)
     if patches:
         return prefix + project + "_patch_data.jsonz"
@@ -163,6 +165,8 @@ def project_to_fname(project, patches=False, combined=False,
         return prefix + project + "_all_blame.jsonz"
     elif reachable:
         return prefix + project + "_reachable.jsonz"
+    elif loc:
+        return prefix + project + "_loc.jsonz"
     else:
         return prefix + project + "_commits.jsonz"
 
@@ -695,8 +699,7 @@ def annotate_mainline(commits, master_commit, runaway=1000000):
 #
 
 
-def build_git_commits(project, update=True, include_patch=False,
-                      include_loc=False):
+def build_git_commits(project, update=True, include_patch=False):
     """Top level routine to generate commit data """
 
     repo_name = get_repo_name(project)
@@ -739,12 +742,6 @@ def build_git_commits(project, update=True, include_patch=False,
     """
 
     annotate_children(commits)   # note parent/child relationships
-
-    if include_loc:
-        print
-        print 'Augment Git data with lines-of-code changed'
-        annotate_commit_loc(commits, repo_name, get_filter_config(project))
-
     jdump(commits, project_to_fname(project))
 
 
@@ -980,7 +977,6 @@ def find_legacy_cutoff(commits, verbose=False):
                 if ('review@openstack.org' in c['committer'] or
                     'openstack-infra@' in c['committer'] or
                     'change_id' in c and c['change_id']):
-                        # print 'Test 1'
                         if commit_date < first_with_date:
                             first_with_date = commit_date
                             first_with = k
@@ -1103,44 +1099,98 @@ def git_annotate_order(commits, repo_name):
     git_annotate_file_order_by_author(commits)
 
 
-def annotate_commit_loc(commits, repo_name, filter_config):
+#
+# New Version
+#
+def annotate_commit_loc(commits, project, clear_cache=False):
     """Computes lines of code changed """
+    print 'Annotating lines of code changed'
+    cache = {}
+    if not clear_cache:
+        try:
+            cache = jload(project_to_fname(project, loc=True))
+            # Hack to remove artifacts left by jdump,
+            # also remove any empty entries
+            """
+            for k, entry in cache.items():
+                if entry:
+                    if 'json_key' in entry:
+                        del cache[k]['json_key']
+                else:
+                    del cache[k]
+            """
+            print '  Loaded Lines of Code Changed cache'
 
+        except Exception:
+            print '  Failed to load Lines of Code Changed cache'
+            cache = {}
+            pass
+
+    cache_initial_size = len(cache)
+    print '  Initial Lines of Code Changed cache size:', cache_initial_size
+
+    repo_name = get_repo_name(project)
+    filter_config = get_filter_config(project)
     repo = git.Repo(repo_name)
     total_operations = 0
-    for commit in commits.values():
-        if not commit['tombstone'] and 'loc_add' not in commit:
-            # print commit['cid']
-            c = repo.commit(commit['cid'])
-            loc_add = 0
-            loc_change = 0
-            detail = {}
-            if len(c.parents) > 0:
-                p = c.parents[0]
+    for k, commit in commits.items():
+        if commit['reachable'] and 'loc_add' not in commit:
+            if k not in cache:
+                # print commit['cid']
+                c = repo.commit(commit['cid'])
+                loc_add = 0
+                loc_change = 0
+                detail = {}
+                if len(c.parents) > 0:
+                    p = c.parents[0]
 
-                # for p in c.parents:    # iterate through each parent
-                for d in c.diff(p, create_patch=True):
-                    if d.a_blob and filter_file(d.a_blob.path,
-                                                filter_config):
-                        fname = d.a_blob.path
-                        adds = sum([1 for txt in d.diff.splitlines()
+                    files = process_commit_files_unfiltered(c)
+                    subset_files = [f for f in files
+                                    if filter_file(f, filter_config)]
+                    for path in subset_files:
+                        # print 'Getting diff object for path:', path
+                        d = c.diff(p, create_patch=True, paths=path)
+                        diff_text = d[0].diff
+                        # print diff_text
+
+                        adds = sum([1 for txt in diff_text.splitlines()
                                     if txt.startswith('+')]) - 1
-                        removes = sum([1 for txt in d.diff.splitlines()
+                        removes = sum([1 for txt in diff_text.splitlines()
                                        if txt.startswith('-')]) - 1
                         changes = max(adds, removes)
-                        detail[fname] = {'add': adds, 'changes': changes}
+                        detail[path] = {'add': adds, 'changes': changes}
                         loc_add += adds
                         loc_change += changes
 
-            commit['loc_add'] = loc_add
-            commit['loc_change'] = loc_change
-            commit['loc_detail'] = detail
+                    cache[k] = {'loc_add': loc_add,
+                                'loc_change': loc_change,
+                                'loc_detail': detail}
+                else:
+                    cache[k] = {'loc_add': 0,
+                                'loc_change': 0,
+                                'loc_detail': {}}
+
+            commit['loc_add'] = cache[k]['loc_add']
+            commit['loc_change'] = cache[k]['loc_change']
+            commit['loc_detail'] = cache[k]['loc_detail']
 
             total_operations += 1
             if total_operations % 100 == 0:
                     print '.',
             if total_operations % 1000 == 0:
                     print total_operations,
+    print
+
+    if len(cache) > cache_initial_size:
+        print
+        print '  Saving updated Lines of Code Changed Cache'
+        jdump(cache, project_to_fname(project, loc=True))
+        """
+        # Hack to remove artifacts left by jdump
+        for k in blame_cache.keys():   # remove key artifact from jload
+            if 'json_key' in blame_cache[k]:
+                del blame_cache[k]['json_key']
+        """
 
 #
 # ------ Other Helper Routes, some not currently used --------

@@ -30,6 +30,7 @@
 # - 3/6/15: Addes support for blame weighted by bug importance
 # - 3/7/15: Mark selected bug fixe commits for future bug fix calculation.
 #           mark_selected_bug_fix_commits(), compute_selected_bug_fixes()
+# - 3/8/15: Added annotate_commit_loc() into commit_postprocessing flow
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -58,6 +59,7 @@ from Git_Extract import author_commiter_same
 from Git_Extract import git_annotate_order
 from Git_Extract import get_commit_ordering_min_max
 from Git_Extract import find_legacy_cutoff
+from Git_Extract import annotate_commit_loc
 
 from jp_load_dump import jload, jdump
 from jp_load_dump import pload, pdump
@@ -792,6 +794,7 @@ def commit_postprocessing(project, importance='low+',
     # Use git_blame to tag commits for inclusion in feature set
     annotate_commit_reachability(project, combined_commits)
     prune_empty_commits(combined_commits, legacy_cutoff)
+    annotate_commit_loc(combined_commits, project)
     git_annotate_order(combined_commits, get_repo_name(project))
     min_order, max_order = get_commit_ordering_min_max(combined_commits)
     print 'Order range for non-legacy comits'
