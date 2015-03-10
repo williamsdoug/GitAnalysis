@@ -38,7 +38,9 @@
 # - 3/5/15  - Updated feature extraction to reflect new schema
 # - 3/10/15 - Clean-up parameter handling in fit_features() and
 #             extract_features()
-
+# - 3/10/15 - remove trailing >" in parse_author_and_org()
+# - 3/10/15 - extract_features() now returns features in sorted order
+#
 #
 # Top Level Routines:
 #    from commit_analysis import blame_compute_normalized_guilt
@@ -318,7 +320,11 @@ def parse_author_and_org(auth):
             raise Exception('Unable to parse author: ' + str(auth))
 
     author_name = result.groups()[0]
+    if author_name.endswith('>"'):
+        author_name = author_name[:-2]
     author_org = author_name.split('@')[-1]
+    if author_org.endswith('>"'):
+        author_org = author_org[:-2]
     return author_name, author_org
 
 
@@ -347,18 +353,18 @@ def add_commit_features(c, feats,
         feats['committer'] = 'same'
 
     if include_order:
-        feats['order'] = math.log(c['order'])
+        feats['log_order'] = math.log(c['order'])
 
     # General information around change (size (loc), code maturity,
     # prior bugs in module)
     if include_files:
         for fname in c['files']:
-            feats[fname] = 1
+            feats['includes_file_' + fname] = 1
 
             if include_order and c['file_order']:
-                feats['min_file_order'] = \
+                feats['log_min_file_order'] = \
                     math.log(min([v for v in c['file_order'].values()]))
-                feats['max_file_order'] = \
+                feats['log_max_file_order'] = \
                     math.log(max([v for v in c['file_order'].values()]))
 
     # Information about code changes
@@ -522,11 +528,14 @@ def extract_features_helper(combined_commits,
     else:
         raise Exception('extract_features: Invalid limit value ' + str(limit))
 
-    cid, Y, features = zip(*[create_feature(x, **kwargs)
-                             for x in combined_commits.values()
-                             if (x['reachable'] and x['order'] >= min_order
-                                 and x['order'] <= max_order)])
+    selected_cid = [[k, c['order']] for k, c in combined_commits.items()
+                    if (c['reachable'] and c['order'] >= min_order
+                    and c['order'] <= max_order)]
 
+    # return features in ascending commit order
+    selected_cid = sorted(selected_cid, key=lambda x: x[1])
+    cid, Y, features = zip(*[create_feature(combined_commits[k], **kwargs)
+                             for k, _ in selected_cid])
     return cid, Y, features
 
 
@@ -577,6 +586,9 @@ def fit_features(combined_commits,
 
     X = vec.fit_transform([f for f in features]).toarray()
     X = scaler.fit_transform(X)
+
+    if True:
+        print 'Total features:', len(vec.feature_names_)
     return extract_state
 
 
@@ -620,11 +632,11 @@ def extract_features(combined_commits, extract_state,
     X = scaler.transform(X)
 
     if debug:
-        print 'total features:', len(features)
+        print 'Total feature vectors:', len(features)
     if threshold:   # Quantize guilt
         Y = np.asarray(Y) > threshold
         if debug:
-            print 'bugs based on threshold:', sum(Y)
+            print '  bugs based on threshold:', sum(Y)
 
     return cid, Y, X, vec.get_feature_names()
 

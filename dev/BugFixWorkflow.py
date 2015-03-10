@@ -31,6 +31,7 @@
 # - 3/7/15: Mark selected bug fixe commits for future bug fix calculation.
 #           mark_selected_bug_fix_commits(), compute_selected_bug_fixes()
 # - 3/8/15: Added annotate_commit_loc() into commit_postprocessing flow
+# = 3/10/15: Added export_feature_vectors_to_csv()
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -39,6 +40,7 @@
 # from BugFixWorkflow import annotate_commit_reachability
 # from BugFixWorkflow import commit_postprocessing
 # from BugFixWorkflow import compute_selected_bug_fixes
+# from BugFixWorkflow import export_feature_vectors_to_csv
 
 import pprint as pp
 import re
@@ -46,11 +48,18 @@ import re
 # import collections
 import datetime
 from datetime import date
+import gzip
+import numpy as np
+import git
+from git import Repo
 
 from commit_analysis import load_all_analysis_data
 from commit_analysis import rebuild_all_analysis_data
-from Git_Extract import assign_blame, get_blame
+from commit_analysis import fit_features, extract_features
 from commit_analysis import blame_compute_normalized_guilt
+from commit_analysis import autoset_threshold
+
+from Git_Extract import assign_blame, get_blame
 from Git_Extract import project_to_fname
 from Git_Extract import process_commit_files_unfiltered, filter_file
 from Git_Extract import extract_master_commit
@@ -60,11 +69,10 @@ from Git_Extract import git_annotate_order
 from Git_Extract import get_commit_ordering_min_max
 from Git_Extract import find_legacy_cutoff
 from Git_Extract import annotate_commit_loc
+from Git_Extract import get_corpus_dir
 
 from jp_load_dump import jload, jdump
 from jp_load_dump import pload, pdump
-import git
-from git import Repo
 
 from git_analysis_config import get_filter_config
 from git_analysis_config import get_repo_name
@@ -963,3 +971,50 @@ def prune_empty_commits(commits, legacy_cutoff):
                                and len(c['files']) == 0]
     for k in reachable_empty_commits:
         commits[k]['reachable'] = False
+
+
+def export_feature_vectors_to_csv(project, importance='med+',
+                                  suffix='_medplus', **kwargs):
+    """Dumps feature vectors in CSV format.  Produces three files:
+       - <project>_feature_vectors.csv
+       - <project>_levels.csv   (guilt value above/below computed
+                                 guilt threshold)
+       - <project>_feature_info.csv (contains commit id, actual guilt value)
+    """
+    combined_commits = commit_postprocessing(project, importance)
+    print 'combined_commits:', len(combined_commits)
+
+    fname = get_corpus_dir(project) + project + suffix
+    print fname
+
+    legacy_cutoff = find_legacy_cutoff(combined_commits)
+    min_order, max_order = get_commit_ordering_min_max(combined_commits)
+    actual_bugs = compute_selected_bug_fixes(combined_commits,
+                                             legacy_cutoff=legacy_cutoff,
+                                             min_order=min_order,
+                                             max_order=max_order)
+    guilt_threshold, labeled_bugs = autoset_threshold(combined_commits,
+                                                      actual_bugs)
+    extract_state = fit_features(combined_commits, min_order=min_order,
+                                 max_order=max_order, **kwargs)
+    all_cid, Y, X, col_names = extract_features(combined_commits,
+                                                extract_state,
+                                                min_order=min_order,
+                                                max_order=max_order,
+                                                threshold=guilt_threshold)
+
+    with gzip.open(fname + '_info.csv.gz', 'wb') as f:
+        f.write('cid, guilt, order\n')    # Header
+        for cid in all_cid:
+            f.write(cid)
+            f.write(str(cid) + ', {0:.8f}, {1:.0f}\n'.format(
+                    combined_commits[cid]['guilt'],
+                    combined_commits[cid]['order']))
+
+    np.savetxt(fname+'_labels.csv.gz', Y, fmt='%.0f', delimiter=',',
+               newline='\n', header='"label"', comments='')
+    np.savetxt(fname+'_feature_vectors.csv.gz', X, fmt='%.8f', delimiter=',',
+               newline='\n',
+               header=','.join(['"' + col.encode('ascii', 'ignore') + '"'
+                                for col in col_names]), comments='')
+    return
