@@ -36,6 +36,8 @@
 # - 2/26/15 - Clean-up handling of change_id
 # - 3/3/15  - Added additional options to rebuild_all_analysis_data()
 # - 3/5/15  - Updated feature extraction to reflect new schema
+# - 3/10/15 - Clean-up parameter handling in fit_features() and
+#             extract_features()
 
 #
 # Top Level Routines:
@@ -497,7 +499,7 @@ def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
 
 def extract_features_helper(combined_commits,
                             min_order, max_order,
-                            offset, limit):
+                            offset, limit, **kwargs):
 
     order_range = max_order - min_order
 
@@ -520,7 +522,7 @@ def extract_features_helper(combined_commits,
     else:
         raise Exception('extract_features: Invalid limit value ' + str(limit))
 
-    cid, Y, features = zip(*[create_feature(x)
+    cid, Y, features = zip(*[create_feature(x, **kwargs)
                              for x in combined_commits.values()
                              if (x['reachable'] and x['order'] >= min_order
                                  and x['order'] <= max_order)])
@@ -530,7 +532,16 @@ def extract_features_helper(combined_commits,
 
 def fit_features(combined_commits,
                  min_order=False, max_order=False,
-                 offset=0, limit=0):
+                 offset=0, limit=0,
+                 include_committer=True,
+                 include_order=True,
+                 include_files=True,
+                 include_lines_of_code=True,
+                 include_blueprint=True,
+                 include_cherrypick=True,
+                 include_bug=True,
+                 include_gerrit=True,
+                 include_gerrit_details=True):
     """Fits features in preparation for extract_features()
     Parameters:
     - min_order, max_order -- range of included commits.  full range
@@ -538,19 +549,31 @@ def fit_features(combined_commits,
     - offset -- relative start, either as integer or percent
     - limit -- overall entries, either integer or percentd
 
-    Returns (except for fit=True):
-    - Labels
-    - Feature Matrix
-    - Feature matrix column names
+    Returns: extract_state, which contains
+    - Dict Vectorizer object (including labels)
+    - MinMax scaler settings
+    - Setting for various feature selection eyword args
     """
 
     vec = DictVectorizer()
     scaler = MinMaxScaler()
-    extract_state = {'vec': vec, 'scaler': scaler}
+    extract_state = {'vec': vec, 'scaler': scaler,
+                     'feat_kwargs':
+                     {'include_committer': include_committer,
+                      'include_order': include_order,
+                      'include_files': include_files,
+                      'include_lines_of_code': include_lines_of_code,
+                      'include_blueprint': include_blueprint,
+                      'include_cherrypick': include_cherrypick,
+                      'include_bug': include_bug,
+                      'include_gerrit': include_gerrit,
+                      'include_gerrit_details': include_gerrit_details}
+                     }
 
     cid, Y, features = extract_features_helper(combined_commits,
                                                min_order, max_order,
-                                               offset, limit)
+                                               offset, limit,
+                                               **extract_state['feat_kwargs'])
 
     X = vec.fit_transform([f for f in features]).toarray()
     X = scaler.fit_transform(X)
@@ -583,7 +606,8 @@ def extract_features(combined_commits, extract_state,
 
     cid, Y, features = extract_features_helper(combined_commits,
                                                min_order, max_order,
-                                               offset, limit)
+                                               offset, limit,
+                                               **extract_state['feat_kwargs'])
 
     X = vec.transform([f for f in features]).toarray()
 
