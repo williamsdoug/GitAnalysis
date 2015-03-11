@@ -5,7 +5,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 3/5/2015
+# Last updated 3/11/2015
 #
 # History:
 # - 9/2/14:  Initial version (initially contained in NovaSampleData).
@@ -40,6 +40,7 @@
 #             extract_features()
 # - 3/10/15 - remove trailing >" in parse_author_and_org()
 # - 3/10/15 - extract_features() now returns features in sorted order
+# - 3/11/15 - Adds dedupe support to commit feature extraction
 #
 #
 # Top Level Routines:
@@ -78,6 +79,7 @@ from Git_Extract import build_git_commits, load_git_commits
 # from Git_Extract import build_all_blame, load_all_blame
 from Git_Extract import filter_bug_fix_combined_commits
 from Git_Extract import project_to_fname
+from Git_Extract import compute_git_actor_dedupe
 from jp_load_dump import convert_to_builtin_type, jload, jdump
 
 
@@ -328,7 +330,7 @@ def parse_author_and_org(auth):
     return author_name, author_org
 
 
-def add_commit_features(c, feats,
+def add_commit_features(c, feats, git_actor_dedupe_table,
                         include_committer=True,
                         include_order=True,
                         include_files=True,
@@ -337,18 +339,21 @@ def add_commit_features(c, feats,
                         include_cherrypick=True,):
     """Extract informaton related to Git Commit"""
 
+    author = git_actor_dedupe_table[c['author']]['standard_actor']
+    committer = git_actor_dedupe_table[c['committer']]['standard_actor']
+
     # General information about author
-    author_name, author_org = parse_author_and_org(c['author'])
-    feats['author'] = author_name
+    feats['author'] = git_actor_dedupe_table[c['author']]['standard_name']
+    _, author_org = parse_author_and_org(c['author'])
     feats['author_org'] = author_org
     feats['author_order'] = math.log(c['author_order'])
 
     # Information about committer
     if not include_committer:
         pass
-    elif c['author'] != c['committer']:
-        committer_name, _ = parse_author_and_org(c['committer'])
-        feats['committer'] = committer_name
+    elif author != committer:
+        feats['committer'] = \
+            git_actor_dedupe_table[c['committer']]['standard_name']
     else:
         feats['committer'] = 'same'
 
@@ -444,7 +449,7 @@ def add_gerrit_features(c, feats, include_gerrit_details=True):
     return
 
 
-def create_feature(c,
+def create_feature(c, git_actor_dedupe_table,
                    include_committer=True,
                    include_order=True,
                    include_files=True,
@@ -459,7 +464,7 @@ def create_feature(c,
     cid = c['cid']
 
     feats = {}
-    add_commit_features(c, feats,
+    add_commit_features(c, feats, git_actor_dedupe_table,
                         include_committer,
                         include_order,
                         include_files,
@@ -532,9 +537,13 @@ def extract_features_helper(combined_commits,
                     if (c['reachable'] and c['order'] >= min_order
                     and c['order'] <= max_order)]
 
+    # generate data to support actor dedupe
+    git_actor_dedupe_table = compute_git_actor_dedupe(combined_commits)
+
     # return features in ascending commit order
     selected_cid = sorted(selected_cid, key=lambda x: x[1])
-    cid, Y, features = zip(*[create_feature(combined_commits[k], **kwargs)
+    cid, Y, features = zip(*[create_feature(combined_commits[k],
+                                            git_actor_dedupe_table, **kwargs)
                              for k, _ in selected_cid])
     return cid, Y, features
 

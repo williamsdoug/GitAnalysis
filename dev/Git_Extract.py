@@ -6,7 +6,7 @@
 #
 # Currently being tested using OpenStack (Nova, Swift, Glance, Cinder, Heat)
 #
-# Last updated 3/5/2015
+# Last updated 3/11/2015
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -1271,9 +1271,10 @@ def get_all_files_from_commit(cid, repo, filter_config, verbose=False):
     return subset_files
 
 
-def compute_git_actor_dedupe(commits, runaway=10):
+def compute_git_actor_dedupe(commits, runaway=10, verbose=False):
     """Cleanse Author and email data"""
-    print 'Deduplicate Git Actors'
+    if verbose:
+        print 'Deduplicate Git Actors'
 
     # Identify all unique actors, and timestamp for most recent activity
     git_actor_timestamps = collections.defaultdict(int)
@@ -1283,7 +1284,8 @@ def compute_git_actor_dedupe(commits, runaway=10):
         git_actor_timestamps[c['committer']] = \
             max(c['date'], git_actor_timestamps[c['committer']])
     all_git_actors = git_actor_timestamps.keys()
-    print '  Total actors:', len(all_git_actors)
+    if verbose:
+        print '  Total actors:', len(all_git_actors)
 
     # Build raw alias data
     name_to_actor = collections.defaultdict(list)
@@ -1312,8 +1314,9 @@ def compute_git_actor_dedupe(commits, runaway=10):
          for k, v in email_to_name.items() if len(v) > 1]
     all_alias = names_with_multi_email + email_with_multi_names
 
-    print '  Names with multiple emails:', len(names_with_multi_email)
-    print '  Email with multiple names:', len(email_with_multi_names)
+    if verbose:
+        print '  Names with multiple emails:', len(names_with_multi_email)
+        print '  Email with multiple names:', len(email_with_multi_names)
 
     # Iteratively merge alias groups until converged on final set
     last_number_of_alias = -1   # Jump start refinement
