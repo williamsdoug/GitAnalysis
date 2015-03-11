@@ -343,7 +343,7 @@ def add_commit_features(c, feats, git_actor_dedupe_table,
     committer = git_actor_dedupe_table[c['committer']]['standard_actor']
 
     # General information about author
-    feats['author'] = git_actor_dedupe_table[c['author']]['standard_name']
+    feats['author'] = git_actor_dedupe_table[c['author']]['standard_email']
     _, author_org = parse_author_and_org(c['author'])
     feats['author_org'] = author_org
     feats['author_order'] = math.log(c['author_order'])
@@ -353,7 +353,7 @@ def add_commit_features(c, feats, git_actor_dedupe_table,
         pass
     elif author != committer:
         feats['committer'] = \
-            git_actor_dedupe_table[c['committer']]['standard_name']
+            git_actor_dedupe_table[c['committer']]['standard_email']
     else:
         feats['committer'] = 'same'
 
