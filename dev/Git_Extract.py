@@ -99,7 +99,8 @@
 # - 3/6/15 -  Moved find_legacy_cutoff from BugFixWorkflow to Git_Extract
 #             to avoid circular import dependencies
 # - 3/6/15 -  Updated annotate_commit_loc() to align with orther global changes
-# - 3/9/15 - Added caching support to LOC computation
+# - 3/9/15 -  Added caching support to LOC computation
+# - 3/11/15 - Added compute_git_actor_dedupe()
 #
 #
 # Top Level Routines:
@@ -120,6 +121,7 @@
 #     from Git_Extract import git_annotate_order
 #     from Git_Extract import get_commit_ordering_min_max
 #     from Git_Extract import find_legacy_cutoff
+#     from Git_Extract import compute_git_actor_dedupe()
 #
 
 from git import *
@@ -1263,3 +1265,103 @@ def get_all_files_from_commit(cid, repo, filter_config, verbose=False):
     if verbose:
         print 'Total selected files:', len(subset_files)
     return subset_files
+
+
+def compute_git_actor_dedupe(commits, runaway=10):
+    """Cleanse Author and email data"""
+    print 'Deduplicate Git Actors'
+
+    # Identify all unique actors, and timestamp for most recent activity
+    git_actor_timestamps = collections.defaultdict(int)
+    for c in commits.values():
+        git_actor_timestamps[c['author']] = \
+            max(c['date'], git_actor_timestamps[c['author']])
+        git_actor_timestamps[c['committer']] = \
+            max(c['date'], git_actor_timestamps[c['committer']])
+    all_git_actors = git_actor_timestamps.keys()
+    print '  Total actors:', len(all_git_actors)
+
+    # Build raw alias data
+    name_to_actor = collections.defaultdict(list)
+    name_to_email = collections.defaultdict(list)
+    email_to_actor = collections.defaultdict(list)
+    email_to_name = collections.defaultdict(list)
+
+    for actor in all_git_actors:
+        name, email = parse_git_actor(actor)
+        name_to_actor[name].append(actor)
+        name_to_email[name].append(email)
+        email_to_actor[email].append(actor)
+        email_to_name[email].append(name)
+
+    if '' in name_to_email:   # handle special cas where blank
+        del name_to_email['']
+    if '' in email_to_name:
+        del email_to_name['']
+
+    # Select names and emails with the potential to be duplicates
+    names_with_multi_email = \
+        [{'names': set([k]), 'email': set(v)}
+         for k, v in name_to_email.items() if len(v) > 1]
+    email_with_multi_names = \
+        [{'email': set([k]), 'names': set(v)}
+         for k, v in email_to_name.items() if len(v) > 1]
+    all_alias = names_with_multi_email + email_with_multi_names
+
+    print '  Names with multiple emails:', len(names_with_multi_email)
+    print '  Email with multiple names:', len(email_with_multi_names)
+
+    # Iteratively merge alias groups until converged on final set
+    last_number_of_alias = -1   # Jump start refinement
+    while len(all_alias) != last_number_of_alias and runaway > 0:
+        runaway -= 1
+        last_number_of_alias = len(all_alias)
+        new_alias = []
+        for this_alias in all_alias:
+            merged = False
+            # See if it overlaps with any already selected alias
+            for i, current in enumerate(new_alias):
+                if (current['names'].intersection(this_alias['names'])
+                    or current['email'].intersection(this_alias['email'])):
+                        merged = True
+                        new_alias[i]['names'] = \
+                            current['names'].union(this_alias['names'])
+                        new_alias[i]['email'] = \
+                            current['email'].union(this_alias['email'])
+            if not merged:
+                new_alias.append(this_alias)
+
+        all_alias = new_alias
+    print '  Total Alias:', len(all_alias)
+
+    # Select first amon equals for name, email and git_actor
+    for alias in all_alias:
+        alias['actors'] = set([actor for n in alias['names']
+                               for actor in name_to_actor[n]]
+                              + [actor for e in alias['email']
+                                 for actor in email_to_actor[e]])
+
+        actors_by_date = [[actor, git_actor_timestamps[actor]]
+                          for actor in alias['actors']]
+        actors_by_date = sorted(actors_by_date, key=lambda x: x[1],
+                                reverse=True)
+        standard_actor = actors_by_date[0][0]
+        name, email = parse_git_actor(standard_actor)
+
+        alias['standard_name'] = name
+        alias['standard_email'] = email
+        alias['standard_actor'] = standard_actor
+
+    git_actor_dedupe_table = {}
+    for actor in all_git_actors:
+        name, email = parse_git_actor(actor)
+        git_actor_dedupe_table[actor] = {'standard_name': name,
+                                         'standard_email': email,
+                                         'standard_actor': actor}
+
+    # Incorporate alias data into lookup table
+    for alias in all_alias:
+        for actor in alias['actors']:
+            git_actor_dedupe_table[actor] = alias
+
+    return git_actor_dedupe_table
