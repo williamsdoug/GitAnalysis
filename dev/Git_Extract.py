@@ -100,7 +100,9 @@
 #             to avoid circular import dependencies
 # - 3/6/15 -  Updated annotate_commit_loc() to align with orther global changes
 # - 3/9/15 -  Added caching support to LOC computation
-# - 3/11/15 - Added compute_git_actor_dedupe()
+# - 3/11/15 - Added compute_git_actor_dedupe().
+# - 3/11/15 - Incorporate actor dedupe into annotate_author_order() and
+#             annotate_file_order_by_author()
 #
 #
 # Top Level Routines:
@@ -1041,13 +1043,14 @@ def git_annotate_commit_order(commits):
         commits[cid]['order'] = i + 1
 
 
-def git_annotate_author_order(commits):
+def git_annotate_author_order(commits, git_actor_dedupe_table):
     """Order of change by author - author maturity"""
     author_commits = collections.defaultdict(list)
 
     for k, c in commits.items():
         if 'order' in c:
-            author_commits[c['author']].append((c['order'], k))
+            author = git_actor_dedupe_table[c['author']]['standard_actor']
+            author_commits[author].append((c['order'], k))
 
     for author, val in author_commits.items():
         for i, (order, c) in enumerate(sorted(val, key=lambda x: x[0])):
@@ -1069,7 +1072,7 @@ def git_annotate_file_order(commits):
             commits[c]['file_order'][fname] = i + 1
 
 
-def git_annotate_file_order_by_author(commits):
+def git_annotate_file_order_by_author(commits, git_actor_dedupe_table):
     """Order of change by file by author - author/file maturity"""
     file_commits_by_author = collections.defaultdict(
         lambda: collections.defaultdict(list))
@@ -1077,8 +1080,8 @@ def git_annotate_file_order_by_author(commits):
     for k, c in commits.items():
         if 'order' in c:
             for fname in c['files']:
-                file_commits_by_author[fname][c['author']].append((c['order'],
-                                                                   k))
+                author = git_actor_dedupe_table[c['author']]['standard_actor']
+                file_commits_by_author[fname][author].append((c['order'], k))
                 # Use this as opportunity to tack on new field
             c['file_order_for_author'] = {}
 
@@ -1088,17 +1091,18 @@ def git_annotate_file_order_by_author(commits):
                 commits[c]['file_order_for_author'][fname] = i + 1
 
 
-def git_annotate_order(commits, repo_name):
+def git_annotate_order(commits):
     """ Annotates commits with ordering information
         - Overall commit order
         - Order of commit on a per-file basis
         - Order of commits by author
         - Order of commits by author on per-file basis
     """
+    git_actor_dedupe_table = compute_git_actor_dedupe(commits)
     git_annotate_commit_order(commits)
-    git_annotate_author_order(commits)
+    git_annotate_author_order(commits, git_actor_dedupe_table)
     git_annotate_file_order(commits)
-    git_annotate_file_order_by_author(commits)
+    git_annotate_file_order_by_author(commits, git_actor_dedupe_table)
 
 
 #
