@@ -480,7 +480,7 @@ def get_all_branch_data(commits, importance, limit=-1):
 
 def collect_all_bug_fix_commits(commits, importance,
                                 legacy_cutoff, limit=-1):
-    """Identified commits needed to compute guilt.  Also basic
+    """Identifies commits needed to compute guilt.  Also basic
     merge processing
     """
 
@@ -689,7 +689,7 @@ def verity_missing_guilt_data(guilt_data, commits):
 
 
 def annotate_guilt(guilt_data, commits, limit=-1):
-    """ """
+    """Apply guilt data to commits"""
     for k, c in commits.items():  # Initialize
         c['guilt'] = 0.0
 
@@ -702,6 +702,15 @@ def annotate_guilt(guilt_data, commits, limit=-1):
 
         for commit_key, guilt in blame_compute_normalized_guilt(entry).items():
             commits[commit_key]['guilt'] += guilt * entry['weight']
+
+    guilty = sum([1 for v in commits.values() if v['guilt'] > 0])
+    min_guilt = min([v['guilt']
+                     for v in commits.values() if v['guilt'] > 0])
+    max_guilt = max([v['guilt']
+                     for v in commits.values() if v['guilt'] > 0])
+    print 'entries with non-zero guilt: ', guilty
+    print 'smallest guilt:', min_guilt
+    print 'largest guilt:', max_guilt
 
 
 def mark_selected_bug_fix_commits(guilt_data, commits):
@@ -803,7 +812,7 @@ def commit_postprocessing(project, importance='low+',
     annotate_commit_reachability(project, combined_commits)
     prune_empty_commits(combined_commits, legacy_cutoff)
     annotate_commit_loc(combined_commits, project)
-    git_annotate_order(combined_commits, get_repo_name(project))
+    git_annotate_order(combined_commits)
     min_order, max_order = get_commit_ordering_min_max(combined_commits)
     print 'Order range for non-legacy comits'
     print '  min:', min_order

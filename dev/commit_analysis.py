@@ -48,7 +48,7 @@
 #    from commit_analysis import normalize_blame_by_file
 #    from commit_analysis import parse_author
 #    from commit_analysis import get_commit_count_by_author
-#    from commit_analysis import get_blame_by_commit
+#    from commit_analysis import get_guilt_by_author
 #    from commit_analysis import compute_guilt
 #    from commit_analysis import fit_features
 #    from commit_analysis import extract_features
@@ -699,28 +699,30 @@ def normalize_blame_by_file(blameset, exp_weighting=True):
     return dict([[k, v/total] for k, v in result.items()])
 
 
-def get_commit_count_by_author(combined_commits):
+def get_commit_count_by_author(combined_commits, min_order=0):
+    """Computes number of commits per author"""
+    git_actor_dedupe_table = compute_git_actor_dedupe(combined_commits)
     commits_by_author = collections.defaultdict(float)
-    for x in combined_commits.values():
-        author = parse_author(x['author'])
-        commits_by_author[author] += 1.0
-
+    for c in combined_commits.values():
+        if c['reachable'] and c['order'] >= min_order:
+            author = git_actor_dedupe_table[c['author']]['standard_email']
+            commits_by_author[author] += 1.0
     return commits_by_author
 
 
-def get_blame_by_commit(combined_commits, all_blame):
-    blame_by_commit = collections.defaultdict(float)
-    for x in all_blame:
-        for commit, weight in \
-            blame_compute_normalized_guilt(x, exp_weighting=True,
-                                           exp=4.0).items():
-            author = parse_author(combined_commits[commit]['author'])
-            blame_by_commit[author] += weight
+def get_guilt_by_author(combined_commits, min_order=0):
+    """Determines cumulative blame for each author """
+    git_actor_dedupe_table = compute_git_actor_dedupe(combined_commits)
+    guilt_by_author = collections.defaultdict(float)
+    for c in combined_commits.values():
+        if c['reachable'] and c['order'] >= min_order:
+            author = git_actor_dedupe_table[c['author']]['standard_email']
+            guilt_by_author[author] += c['guilt']
+    return guilt_by_author
 
-    return blame_by_commit
 
-
-def compute_guilt(combined_commits, all_blame, importance='high+'):
+def OBSOLETE_compute_guilt(combined_commits, all_blame, importance='high+'):
+    """Relaced by annotate_guilt() in BugFixWorkflow"""
     for c in combined_commits.values():  # initialize guilt values
         c['guilt'] = 0.0
     skipped = 0

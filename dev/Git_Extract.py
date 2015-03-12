@@ -1339,7 +1339,8 @@ def compute_git_actor_dedupe(commits, runaway=10, verbose=False):
                 new_alias.append(this_alias)
 
         all_alias = new_alias
-    print '  Total Alias:', len(all_alias)
+    if verbose:
+        print '  Total Alias:', len(all_alias)
 
     # Select first amon equals for name, email and git_actor
     for alias in all_alias:
