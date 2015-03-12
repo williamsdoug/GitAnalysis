@@ -18,6 +18,7 @@ Analysis Notebooks for Various OpenStack Projects:
 
 
 ./dev includes all python code.
+Additional information can be found in [_README Notebook](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb)
 
 Configuration file located at: ./dev/git_analysis_config.py
 
