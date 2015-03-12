@@ -14,7 +14,7 @@ See: OpenStackSampleData.ipynb for examples of each record format.  This noteboo
 
 Configuration file located at: ./dev/git_analysis_config.py
 
-Dataset build script: http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Rebuild_all_Datasets.ipynb
+Dataset build script: http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Rebuild_All_Datasets.ipynb
 
 
 Changes
