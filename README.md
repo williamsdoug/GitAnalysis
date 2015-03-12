@@ -9,6 +9,13 @@ Sample analysis data can be found at [williamsdoug/GitAnalyticsDatasets](https:/
 
 See: IPython notebook [OpenStackSampleData.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/OpenStackSampleData.ipynb) for examples of each record format.
 
+Analysis Notebooks for Various OpenStack Projects:
+- [Cinder](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/CinderAnalysis.ipynb)
+- [Glance](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/GlanceAnalysis.ipynb)
+- [Heat](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/HeatAnalysis.ipynb)
+- [Nova](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/NovaAnalysis.ipynb)
+- [Swift](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/SwiftAnalysis.ipynb)
+
 
 ./dev includes all python code.
 
