@@ -6,9 +6,8 @@ Code for Git Analytics
 Copyright Doug Williams, 2015
 
 Sample analysis data can be found at [williamsdoug/GitAnalyticsDatasets](https://github.com/williamsdoug/GitAnalyticsDatasets)
-
 - [Various Dataset Sizes](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Dataset_Sizes.ipynb)
-See: IPython notebook [OpenStack_Sample_Data.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/OpenStack_Sample_Data.ipynb) for examples of each record format.
+- See: IPython notebook [OpenStack_Sample_Data.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/OpenStack_Sample_Data.ipynb) for examples of each record format.
 
 Analysis Notebooks for Various OpenStack Projects:
 - [Cinder](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Analysis_of_Cinder.ipynb)
