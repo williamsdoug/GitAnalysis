@@ -32,6 +32,8 @@
 #           mark_selected_bug_fix_commits(), compute_selected_bug_fixes()
 # - 3/8/15: Added annotate_commit_loc() into commit_postprocessing flow
 # = 3/10/15: Added export_feature_vectors_to_csv()
+# - 3/18/15: Added weight_importance_policy (wip) to annotate guilt. Previously
+#            handled upstream in get_bug_fix_weight
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -160,11 +162,8 @@ def is_bug_fix(c, importance='low+', status='fixed', heat=-1):
 
 
 def get_bug_fix_weight(bugs, importance, scaling='linear'):
-    """Computes weight for bug based on bug importance value
-       Scaling options:
-       - flat - no scaling,
-       - Linear
-       - exp - expressed as number
+    """Computes raw weight for bug based on bug importance value
+       Scaling policy handled downstream in annotate_guilt
       """
     global BUG_WEIGHT_VALUES
     global IMPORTANCE_BASE_LEVEL
@@ -176,17 +175,7 @@ def get_bug_fix_weight(bugs, importance, scaling='linear'):
                       for bugno in bugs if bugno in ALL_BUGS])
     norm_weight = max(raw_weight - IMPORTANCE_BASE_LEVEL[importance], 0)
 
-    if scaling == 'flat':
-        return min(norm_weight, 1)
-    elif scaling == 'linear':
-        return norm_weight
-    elif scaling == 'exp':
-        return 2.0**((norm_weight - 1) / 2.0)
-    elif type(scaling) in [int, float]:
-        return float(scaling)**(norm_weight - 1.0)
-    else:
-        print 'get_bug_fix_weight: Invalid scaling value'
-        raise Exception
+    return norm_weight
 
 
 #
@@ -688,7 +677,23 @@ def verity_missing_guilt_data(guilt_data, commits):
             and len(commits[entry['diff_commit']]['files']) > 0]
 
 
-def annotate_guilt(guilt_data, commits, limit=-1):
+def apply_weight_by_importance(weight, policy='linear'):
+    """Determines weighting factor for guilt based on
+       importance of associated bug"""
+    if policy == 'flat':
+        return 1.0
+    elif policy == 'linear':
+        return weight
+    elif policy == 'strong_exp':
+        return 2.0**((weight - 1) / 1.0)
+    elif policy == 'weak_exp':
+        return 2.0**((weight - 1) / 2.0)
+    else:
+        raise Exception('apply_weight_by_importance: Unknown weight policy')
+
+
+def annotate_guilt(guilt_data, commits, limit=-1,
+                   weight_importance_policy='linear'):
     """Apply guilt data to commits"""
     for k, c in commits.items():  # Initialize
         c['guilt'] = 0.0
@@ -701,7 +706,9 @@ def annotate_guilt(guilt_data, commits, limit=-1):
             break
 
         for commit_key, guilt in blame_compute_normalized_guilt(entry).items():
-            commits[commit_key]['guilt'] += guilt * entry['weight']
+            commits[commit_key]['guilt'] += \
+                guilt * apply_weight_by_importance(entry['weight'],
+                                                   weight_importance_policy)
 
     guilty = sum([1 for v in commits.values() if v['guilt'] > 0])
     min_guilt = min([v['guilt']
@@ -756,7 +763,8 @@ def compute_selected_bug_fixes(commits, min_order=False, max_order=False,
 
 def build_all_guilt(project, combined_commits,
                     clear_cache=False, apply_guilt=True,
-                    importance='low+'):
+                    importance='low+',
+                    wip='linear'):
     """Top level routine for Merge processing and guilt annotation"""
 
     print 'Determining legacy cut-off'
@@ -780,7 +788,8 @@ def build_all_guilt(project, combined_commits,
         print len(missing_guilt_data)
     if apply_guilt:
         print 'Annotating Guilt'
-        annotate_guilt(guilt_data, combined_commits)
+        annotate_guilt(guilt_data, combined_commits,
+                       weight_importance_policy=wip)
     mark_selected_bug_fix_commits(guilt_data, combined_commits)
     return guilt_data
 
@@ -791,7 +800,8 @@ def build_all_guilt(project, combined_commits,
 def commit_postprocessing(project, importance='low+',
                           rebuild=False,
                           rebuild_with_download=False,
-                          rebuild_incr=True):
+                          rebuild_incr=True,
+                          wip='linear'):
     """Top level bug-workflow routine. Computes guilt, determines
     commit relevance and annotates commit ordering.
     """
@@ -806,7 +816,8 @@ def commit_postprocessing(project, importance='low+',
     legacy_cutoff = find_legacy_cutoff(combined_commits)
 
     guilt_data = build_all_guilt(project, combined_commits,
-                                 importance=importance)
+                                 importance=importance,
+                                 wip=wip)
 
     # Use git_blame to tag commits for inclusion in feature set
     annotate_commit_reachability(project, combined_commits)
@@ -983,14 +994,15 @@ def prune_empty_commits(commits, legacy_cutoff):
 
 
 def export_feature_vectors_to_csv(project, importance='med+',
-                                  suffix='_medplus', **kwargs):
+                                  suffix='_medplus', wip='linear',
+                                  **kwargs):
     """Dumps feature vectors in CSV format.  Produces three files:
        - <project>_feature_vectors.csv
        - <project>_levels.csv   (guilt value above/below computed
                                  guilt threshold)
        - <project>_feature_info.csv (contains commit id, actual guilt value)
     """
-    combined_commits = commit_postprocessing(project, importance)
+    combined_commits = commit_postprocessing(project, importance, wip=wip)
     print 'combined_commits:', len(combined_commits)
 
     fname = get_corpus_dir(project) + project + suffix
