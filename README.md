@@ -17,6 +17,23 @@ Analysis Notebooks for Various OpenStack Projects:
 - [Swift](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Analysis_of_Swift.ipynb)
 
 
+Performance of individual solvers:
+
+- [AdaBoost](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/- [Cinder](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_AdaBoost.ipynb)
+- [DecisionTree](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_DecisionTree.ipynb)
+- [ExtraTrees](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_ExtraTree.ipynb)
+- [GradientTreeBoosting](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_GradientTreeBoosting.ipynb)
+- [Logistic Regression](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_LogisticRegression.ipynb)
+- [Naive Bayes - Gaussian](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_NaiveBayes.ipynb)
+- [Random Forest](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_RandomForest.ipynb)
+- [Stochastic Gradient Descent](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_SGD.ipynb)
+- [Support Vector Machines](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_SVM.ipynb)
+
+
+Others, may be a bit rough:
+- [Composite learner using boosting](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Composite_Learner.ipynb)
+- Neural Networks using Multi-Layer Perceptron:[First Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/MLP_Round 1.ipynb) and [Second Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/MLP_Round 2.ipynb)
+
 ./dev includes all python code.
 Additional information can be found in [_README Notebook](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb)
 
