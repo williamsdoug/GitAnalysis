@@ -2,7 +2,8 @@
 #
 # from ml_plot import plot_validation_curve, plot_learning_curve
 # from ml_plot import get_datasets, eval_clf, eval_predictions
-# from ml_plot import PredictCV
+# from ml_plot import PredictCV, PredictCV_TrainTest
+# from ml_plot import PredictCV_TrainTestValidate
 # from ml_plot import my_plot_learning_curve
 # from ml_plot import plot_prediction_curve
 
@@ -25,7 +26,7 @@ from BugFixWorkflow import commit_postprocessing
 from BugFixWorkflow import find_legacy_cutoff
 
 
-class PredictCV():
+class PredictCV(object):
     """Prediction cross validation iterator.
 
     Training based on prior history, testing based on immediately
@@ -101,6 +102,26 @@ class PredictCV():
         return self.n_iter
 
 
+def PredictCV_TrainTest(X, Y, **kwargs):
+    for train_idx, test_idx in PredictCV(len(Y), **kwargs):
+        yield X[train_idx], Y[train_idx], X[test_idx], Y[test_idx]
+
+
+def PredictCV_TrainTestValidate(X, Y, train_size=50, test_size=50,
+                                validate_size=50, shuffle=True,
+                                **kwargs):
+    for combined_idx, validate_idx in \
+        PredictCV(len(Y), history=(train_size+test_size),
+                  future=validate_size, **kwargs):
+        if shuffle:
+            np.random.shuffle(combined_idx)
+        train_idx = combined_idx[0:train_size]
+        test_idx = combined_idx[train_size:]
+        yield [X[train_idx], Y[train_idx],
+               X[test_idx], Y[test_idx],
+               X[validate_idx], Y[validate_idx]]
+
+
 def get_dataset(project, importance):
     combined_commits = commit_postprocessing(project, importance=importance)
 
@@ -152,12 +173,13 @@ def eval_clf(clf, X, Y, verbose=True, title=False):
             'confusion': confusion}
 
 
-def eval_predictions(clf, X, Y, history_sizes=[], future_sizes=[]):
+def eval_predictions(clf, X, Y, history_sizes=[], future_sizes=[], n_iter=10):
     all_results = []
     for history in history_sizes:
         for future in future_sizes:
             results = []
-            cv = PredictCV(len(Y), history=history, future=future, n_iter=10)
+            cv = PredictCV(len(Y), history=history, future=future,
+                           n_iter=n_iter)
             title = '** Predictions for hist=' + str(history) \
                     + ' future='+str(future) + ' **'
             for train_idx, test_idx in cv:
@@ -318,7 +340,8 @@ def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
 def my_plot_learning_curve(estimator, title, X, y, ylim=None,
                            n_jobs=1, future=100, scoring='f1',
                            history_sizes=[50, 100, 200, 300,
-                                          400, 500, 1000]):
+                                          400, 500, 1000],
+                           n_iter=10):
     """
     Generate a simple plot of the test learning curve.
 
@@ -368,7 +391,7 @@ def my_plot_learning_curve(estimator, title, X, y, ylim=None,
     for h in history_sizes:
         scores = cross_val_score(estimator, X, y=y, scoring=scoring,
                                  cv=PredictCV(len(y), history=h,
-                                              future=future, n_iter=10),
+                                              future=future, n_iter=n_iter),
                                  n_jobs=n_jobs)
 
         test_scores_mean.append(np.mean(scores))
@@ -389,7 +412,8 @@ def my_plot_learning_curve(estimator, title, X, y, ylim=None,
 
 def plot_prediction_curve(estimator, title, X, y, ylim=None,
                           n_jobs=1, history=500, scoring='f1',
-                          future_sizes=[50, 100, 200, 300, 500]):
+                          future_sizes=[50, 100, 200, 300, 500],
+                          n_iter=10):
     """
     Generate a simple plot of the test prediction curve.
 
@@ -439,7 +463,7 @@ def plot_prediction_curve(estimator, title, X, y, ylim=None,
     for f in future_sizes:
         scores = cross_val_score(estimator, X, y=y, scoring=scoring,
                                  cv=PredictCV(len(y), history=history,
-                                              future=f, n_iter=10),
+                                              future=f, n_iter=n_iter),
                                  n_jobs=n_jobs)
 
         test_scores_mean.append(np.mean(scores))
