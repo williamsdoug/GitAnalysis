@@ -12,5 +12,8 @@ Major files:
 Configuration File:
 - git_analysis_config.py
 
+Other files:
+- ml_plot.py - helper routines for analytics spreadsheets
+
 Notes:
-- Code still mostly hard-coded to OpenStack tools chain Git+LaunchPad+Gerrit.  Needs t ve extended for other development toolchains as well.  
+- Code still mostly hard-coded to OpenStack toolchain Git+LaunchPad+Gerrit.  Needs to be extended for other development toolchains as well.  
