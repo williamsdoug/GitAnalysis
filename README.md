@@ -19,7 +19,7 @@ Analysis Notebooks for Various OpenStack Projects:
 
 Performance of individual solvers:
 
-- [AdaBoost](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/- [Cinder](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_AdaBoost.ipynb)
+- [AdaBoost](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_AdaBoost.ipynb)
 - [DecisionTree](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_DecisionTree.ipynb)
 - [ExtraTrees](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_ExtraTree.ipynb)
 - [GradientTreeBoosting](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Curves_GradientTreeBoosting.ipynb)
