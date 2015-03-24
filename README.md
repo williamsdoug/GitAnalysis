@@ -32,7 +32,7 @@ Performance of individual solvers:
 
 Others, may be a bit rough:
 - [Composite learner using boosting](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/Composite_Learner.ipynb)
-- Neural Networks using Multi-Layer Perceptron:[First Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/MLP_Round 1.ipynb) and [Second Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/MLP_Round 2.ipynb)
+- Neural Networks using Multi-Layer Perceptron:[First Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/MLP_Round_1.ipynb) and [Second Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/MLP_Round_2.ipynb)
 
 ./dev includes all python code.
 Additional information can be found in [_README Notebook](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb)
