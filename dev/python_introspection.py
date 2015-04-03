@@ -12,6 +12,8 @@
 # History:
 # - 3/31/15 - Initial version, based on expderimental work in iPython notebook
 # - 4/1/15  - Adds support for language aware difference: pyDiff
+# - 4/3/15  - Adds support for computing AST depth.  Includes getDepth(),
+#             ComputeDepth [nodeVisitor class], and displayDepthResults
 #
 # Top Level Routines:
 #  - pyDiff():  Compares two AST for differences
@@ -36,14 +38,20 @@
 #                           within a pool of source code.  Wrapper for
 #                           FindUniqueClasses
 #
+# - getDepth():  Function level and aggregate depth AST depth statistics at
+#                statement, expression and node level.  getDepth() is wapper
+#                for ComputeDepth AST nodeVisitor class.  displayDepthResults()
+#                can be used to print out results.
+#
 # from python_introspection import pyDiff
 # from python_introspection import get_all_files, get_st_from_file, show_st
 # from python_introspection import get_total_nodes
 # from python_introspection import get_stats, get_delta_stats, combine_stats
 # from python_introspection import get_unique_classes
+# from python_introspection import ComputeDepth, getDepth, displayDepthResults
 
 import ast
-from pprint import pprint
+# from pprint import pprint
 import collections
 import os
 import fnmatch
@@ -608,9 +616,9 @@ def propagate_matches(htree, verbose=True):
                         changes += 1
                         child['match_type'] = 'Unique'
                     elif child['match_type'] == 'Unmatched':
-                        raise Exception('propagate_matches: match conflict,'
-                                        + ' unmatched child for unqiuely '
-                                        + 'matched parent')
+                        raise Exception('propagate_matches: match conflict, '
+                                        'unmatched child for unqiuely '
+                                        'matched parent')
     unresolved = [[h, ht] for h, ht in get_hashes(htree)
                   if ht['match_type'] == 'Potential']
     unmatched = [[h, ht] for h, ht in get_hashes(htree)
@@ -751,3 +759,120 @@ def pyDiff(diff1_st, diff2_st, verbose=False):
         print 'Unmatched:', len(unmatched2)
 
     return unresolved1, unmatched1, unresolved2, unmatched2
+
+
+#
+# Compute AST Depth statistics
+#
+
+class ComputeDepth(ast.NodeVisitor):
+    """Collects statistics on tree depth by function, at statement,
+    expression and node levels
+    """
+    results = []  # results for each function
+    stats = {}    # per-function stats
+    classes = []  # remember naming hierarchy for classes
+
+    def init_stats(self):
+        self.stats = {}
+        for level in ['stmt', 'expr', 'node']:
+            self.stats[level] = {'depth': 0,
+                                 'max_depth': 0,
+                                 'sum_of_depth': 0,
+                                 'instances': 0}
+
+    def __init__(self):
+        self.classes = []
+        self.results = []
+        self.init_stats()
+        super(ComputeDepth, self).__init__()
+
+    def visit_ClassDef(self, node):
+        self.classes.append(node.name)
+        self.generic_visit(node)
+        self.classes = self.classes[0:-1]
+
+    def visit_FunctionDef(self, node):
+        self.init_stats()
+        self.generic_visit(node)
+
+        name = node.name  # compute name, prefix with class name as appropriate
+        if self.classes:
+            name = '.'.join(self.classes) + '.' + name
+        self.stats['name'] = name
+
+        for level in ['stmt', 'expr', 'node']:  # compute per-function averages
+            self.stats[level]['avg_depth'] = (
+                float(self.stats[level]['sum_of_depth'])
+                / float(self.stats[level]['instances']))
+        self.results.append(self.stats)
+
+    def generic_visit(self, node):
+        # update per-node stats
+        self.stats['node']['max_depth'] = max(self.stats['node']['max_depth'],
+                                              self.stats['node']['depth'])
+        self.stats['node']['sum_of_depth'] += self.stats['node']['depth']
+        self.stats['node']['instances'] += 1
+        self.stats['node']['depth'] += 1
+
+        if isinstance(node, ast.stmt):  # update statement level stats
+            self.stats['stmt']['depth'] += 1
+            self.stats['stmt']['max_depth'] = max(
+                self.stats['stmt']['max_depth'], self.stats['stmt']['depth'])
+            self.stats['stmt']['sum_of_depth'] += self.stats['stmt']['depth']
+            self.stats['stmt']['instances'] += 1
+
+        if isinstance(node, ast.expr):  # update expression level stats
+            self.stats['expr']['depth'] += 1
+            self.stats['expr']['max_depth'] = max(
+                self.stats['expr']['max_depth'], self.stats['expr']['depth'])
+            self.stats['expr']['sum_of_depth'] += self.stats['expr']['depth']
+            self.stats['expr']['instances'] += 1
+
+        super(ComputeDepth, self).generic_visit(node)
+
+        # decrement depth counters
+        self.stats['node']['depth'] -= 1
+        if isinstance(node, ast.stmt):
+            self.stats['stmt']['depth'] -= 1
+        if isinstance(node, ast.expr):
+            self.stats['expr']['depth'] -= 1
+
+    def visit(self, node):
+        super(ComputeDepth, self).visit(node)
+        return self.results
+
+
+def getDepth(node):
+    """Wrapper for ComputeDepth, also determines max and average
+    depth across all functions for nodes, expressions and statements."""
+    results = ComputeDepth().visit(node)
+    totals = {}
+    for level in ['stmt', 'expr', 'node']:
+        totals[level] = {}
+        totals[level]['max_depth'] = max([r[level]['max_depth']
+                                          for r in results])
+        totals[level]['sum_of_depth'] = sum([r[level]['sum_of_depth']
+                                             for r in results])
+        totals[level]['instances'] = sum([r[level]['instances']
+                                          for r in results])
+        totals[level]['avg_depth'] = (float(totals[level]['sum_of_depth'])
+                                      / float(totals[level]['instances']))
+    return totals, results
+
+
+def displayDepthResults(totals, results):
+    """Displays function level and aggregated depth statistics"""
+    for r in results:
+        print
+        print r['name']
+        for level in ['stmt', 'expr', 'node']:
+            print '    %s -- avg %0.1f  peak %0.1f' % (level,
+                                                       r[level]['avg_depth'],
+                                                       r[level]['max_depth'])
+    print
+    print 'Aggregated:'
+    for level in ['stmt', 'expr', 'node']:
+        print '    %s -- avg %0.1f  peak %0.1f' % (level,
+                                                   totals[level]['avg_depth'],
+                                                   totals[level]['max_depth'])
