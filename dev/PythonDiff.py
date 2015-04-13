@@ -1,26 +1,24 @@
-
-# coding: utf-8
-
-# #Python Differences
 #
-# This notebook explores the use of the native Python parser to perform
-# file differences
+# PythonDiff.py -- Code to determine differences bertween two python files
 #
-# This is the third attempt at diff, with an attempt to reduce complexity
-# and corner-cases.
+# Author:  Doug Williams - Copyright 2015
 #
-# #To Do: Alternative Approach
-# - Initially only parse top lebel (and next level, if contains class
-#  - AST for functions, classes and top-level statements
-# - Try to match, where possible (by function name, class name,
-#   assignment name)
-# - Compute hashes for both versions, discard any matches.
-# - Use approach below for refinement only, breadth first to identify
-#   matching sub-trees
+# Last Updated: 10-Apr-2015
 #
-# ###Nomenclaure:
+# Nomenclaure:
 # - AST, ST - Abstract Syntax Tree  (from Python standatd library)
 # - HT - Hash Tree - AST annotates with signatures of each included element
+#
+# Issues and To Do:
+# - Need to reconsole with PythonIntrospection and remove obsolete code.
+#
+# History:
+# - 4/x/15:  Initial version, created from iPython notebook
+# - 4/13/15: Various bug fixes after testing against Nova git repo
+#
+# Top level routines
+# from PythonDiff import recursiveDiff, pythonDiff, printSubtree
+# from PythonDiff import GetSubtrees, GetHash
 
 import ast
 # import _ast
@@ -29,6 +27,7 @@ from pprint import pprint
 # import os
 import collections
 import hashlib
+# from python_introspection import show_st
 
 
 #
@@ -67,14 +66,54 @@ class GetHash(ast.NodeVisitor):
 
 
 def getTargetName(node):
+    # show_st(node)
     """Returns text representing target for an assignment """
     if isinstance(node, ast.Name):
         return node.id
     elif isinstance(node, ast.Attribute):
         # print getTargetName(node.value) + '__attribute__' + node.attr
         return getTargetName(node.value) + '__attribute__' + node.attr
+    elif isinstance(node, ast.Tuple) or isinstance(node, ast.List):
+        return '__'.join([getTargetName(e) for e in node.elts])
+    elif isinstance(node, ast.Subscript):
+        # print type(node)
+        return (getTargetName(node.value)
+                + '[' + getTargetName(node.slice) + ']')
+    elif isinstance(node, ast.Index):
+        # print type(node)
+        return getTargetName(node.value)
+    elif isinstance(node, ast.Slice):
+        # print type(node)
+        result = ''
+        if node.lower:
+            result += getTargetName(node.lower)
+        result += ':'
+        if node.upper:
+            result += getTargetName(node.upper)
+        result += ':'
+        if node.step:
+            result += ':' + getTargetName(node.step)
+        return result
+    elif isinstance(node, ast.ExtSlice):
+        # print type(node)
+        return ','.join([getTargetName(e) for e in node.dims])
+    elif isinstance(node, ast.Num):
+        return str(node.n)
+    elif isinstance(node, ast.Str):
+        return str(node.s)
+    elif isinstance(node, ast.BinOp):
+        return (getTargetName(node.left)
+                + type(node.op).__name__
+                + getTargetName(node.right))
     else:
-        raise Exception('getTargetName: unknown target type')
+        result = type(node).__name__
+        params = [repr(k) + '=' + repr(v)
+                  for k, v in ast.iter_fields(node)
+                  if v and 'object at 0x' not in repr(v)]
+        if params:
+            result = result + '+' + '+'.join(params)
+        print 'getTargetName: default format - ', result
+        return result
 
 
 class GetSubtrees(ast.NodeVisitor):
@@ -94,6 +133,18 @@ class GetSubtrees(ast.NodeVisitor):
         self.entry = None
         self.depth = 0
         super(GetSubtrees, self).__init__()
+
+    @staticmethod
+    def getSignature(node):
+        sig = ''
+        if not isinstance(node, ast.AST):
+            raise Exception('getSignature - Invalid type')
+        sig += type(node).__name__
+        for k, v in ast.iter_fields(node):
+            vv = repr(v)
+            if v and 'object at 0x' not in vv:
+                sig += ' ' + k + '=' + vv
+        return sig
 
     def visit_ClassDef(self, node):
         self.entry = {'name': node.name,
@@ -128,6 +179,7 @@ class GetSubtrees(ast.NodeVisitor):
                                'ast': node,
                                'hash': GetHash().visit(node),
                                'pair': None,
+                               'sig': self.getSignature(node),
                                'full_match': False
                                })
             self.results.append(self.entry)
@@ -387,10 +439,14 @@ def compareSubtrees(subtreesA, subtreesB, verbose=True):
         pB['pair'] = pA
         pA['full_match'] = True
         pB['full_match'] = True
+        pA['node_match'] = True
+        pB['node_match'] = True
 
     for pA, pB in diffPairs:
         pA['pair'] = pB
         pB['pair'] = pA
+        pA['node_match'] = (pA['sig'] == pB['sig'])
+        pB['node_match'] = (pA['sig'] == pB['sig'])
 
     if verbose:
         print
@@ -437,13 +493,7 @@ def recursiveDiff(subtreesA, subtreesB, verbose=True, level=0):
     identicalPairs, diffPairs, unmatched = compareSubtrees(subtreesA,
                                                            subtreesB,
                                                            verbose=verbose)
-
     for pA, pB in diffPairs:
-        # pprint(pair)
-        # if ((isinstance(pA['ast'], ast.stmt) and isinstance(pB['ast'],
-        #                                                     ast.stmt))
-        #    or (isinstance(pA['ast'], ast.expr) and isinstance(pB['ast'],
-        #                                                       ast.expr))):
         if pA['ast'] and pB['ast']:
             # print 'Drilldown'
             pA['subtrees'] = GetSubtrees().visit(pA['ast'])
