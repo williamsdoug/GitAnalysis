@@ -3,7 +3,7 @@
 #
 # Author:  Doug Williams - Copyright 2015
 #
-# Last Updated: 10-Apr-2015
+# Last Updated: 13-Apr-2015
 #
 # Nomenclaure:
 # - AST, ST - Abstract Syntax Tree  (from Python standatd library)
@@ -16,7 +16,10 @@
 # - 4/x/15:  Initial version, created from iPython notebook
 # - 4/13/15: Various bug fixes after testing against Nova git repo
 #
-# Top level routines
+# Top level Routines:
+#  - pythonDiff() - Compares two AST sub-trees
+#
+#
 # from PythonDiff import recursiveDiff, pythonDiff, printSubtree
 # from PythonDiff import GetSubtrees, GetHash
 
@@ -31,7 +34,7 @@ import hashlib
 
 
 #
-# Generatim of Hashes for stb=trees
+# Generatim of Hashes for subtrees
 #
 
 
@@ -286,6 +289,7 @@ def findBestCandidate(candidates, verbose=True):
 
 
 def matchOnLineno(subtreesA, subtreesB, offset=None, verbose=True):
+    """Attempts pairing based on line number proximity"""
     if verbose:
         print
         print 'calling matchOnLineno   - offset:', offset
@@ -468,11 +472,11 @@ def compareSubtrees(subtreesA, subtreesB, verbose=True):
                 pprint(entry)
 
         print
-
     return identicalPairs, diffPairs, [unmatchedA, unmatchedB]
 
 
 def printSubtree(subtrees, level=0, indent=4):
+    """Print hierarchical view of a subtree """
     for tree in subtrees:
         has_pair = 'P' if tree['pair'] else '-'
         if tree['full_match']:
@@ -489,7 +493,7 @@ def printSubtree(subtrees, level=0, indent=4):
 
 
 def recursiveDiff(subtreesA, subtreesB, verbose=True, level=0):
-    """Drill down to  """
+    """Compare next level of nodes within trees"""
     identicalPairs, diffPairs, unmatched = compareSubtrees(subtreesA,
                                                            subtreesB,
                                                            verbose=verbose)
@@ -503,6 +507,7 @@ def recursiveDiff(subtreesA, subtreesB, verbose=True, level=0):
 
 
 def pythonDiff(nodeA, nodeB, verbose=True):
+    """Tope level routine to compare two AST sub-trees"""
     subtreesA = GetSubtrees().visit(nodeA)
     subtreesB = GetSubtrees().visit(nodeB)
 
