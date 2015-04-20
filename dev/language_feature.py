@@ -368,12 +368,14 @@ def process_commit_diff(c, verbose=False):
                     print d.b_blob.path
                 sys.stdout.flush()
 
-            if ((isValidBlob(d.a_blob) and (not d.a_blob.path.endswith('.py')
+            if ((not d.a_blob and not d.b_blob)
+                or
+                (isValidBlob(d.a_blob) and (not d.a_blob.path.endswith('.py')
                                             or 'test' in d.a_blob.path))
                 or
                 (isValidBlob(d.b_blob) and (not d.b_blob.path.endswith('.py')
                                             or 'test' in d.b_blob.path))):
-                if True:
+                if verbose:
                     print 'skipping'
                 continue
 
@@ -384,22 +386,28 @@ def process_commit_diff(c, verbose=False):
             elif not isValidBlob(d.b_blob):
                 if verbose:
                     print 'Add A'
-                result = process_commit_add(d, verbose=verbose)
-                if result['changes'] > 0:
-                    getMetrics(d.a_blob, result, verbose=True)
-                    results.append(result)
-                    if verbose:
-                        pprint(result)
-            elif (isValidBlob(d.a_blob) and isValidBlob(d.b_blob)
-                  and d.b_blob.path.endswith('.py')):
-                    result = processDiff(d, verbose=verbose)
-                    print '*',
-                    sys.stdout.flush()
+                try:
+                    result = process_commit_add(d, verbose=verbose)
                     if result['changes'] > 0:
-                        getMetrics(d.b_blob, result, verbose=True)
+                        getMetrics(d.a_blob, result, verbose=True)
                         results.append(result)
                         if verbose:
                             pprint(result)
+                except SyntaxError:
+                    pass
+            elif (isValidBlob(d.a_blob) and isValidBlob(d.b_blob)
+                  and d.b_blob.path.endswith('.py')):
+                    try:
+                        result = processDiff(d, verbose=verbose)
+                        print '*',
+                        sys.stdout.flush()
+                        if result['changes'] > 0:
+                            getMetrics(d.b_blob, result, verbose=True)
+                            results.append(result)
+                            if verbose:
+                                pprint(result)
+                    except SyntaxError:
+                        pass
             else:
                 raise Exception('Unknown change format')
 
@@ -418,6 +426,7 @@ def processDiff(d, verbose=False):
     changesA, changesB = parse_diff_txt(d.diff, verbose=verbose)
 
     st_a, txt_a = get_st_from_blob(d.a_blob)
+
     line_rangesA = get_line_ranges(st_a, txt_a)
     annotate_changes(line_rangesA, changesA)
     if verbose:
@@ -484,7 +493,7 @@ def test_all_git_commits(project, verbose=False, limit=-1, skip=-1):
             total_operations += 1
             if total_operations % 100 == 0:
                 print '.',
-            if total_operations % 1000 == 0:
+            if total_operations % 100 == 0:
                 print total_operations,
             limit -= 1
             if limit == 0:
