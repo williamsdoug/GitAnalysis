@@ -523,7 +523,7 @@ class ComputeDepth(ast.NodeVisitor):
         for level in ['stmt', 'expr', 'node']:  # compute per-function averages
             self.stats[level]['avg_depth'] = (
                 float(self.stats[level]['sum_of_depth'])
-                / float(self.stats[level]['instances']))
+                / float(max(self.stats[level]['instances'], 1)))
         self.results.append(self.stats)
 
     def generic_visit(self, node):
@@ -576,7 +576,8 @@ def getDepth(node):
         totals[level]['instances'] = sum([r[level]['instances']
                                           for r in results])
         totals[level]['avg_depth'] = (float(totals[level]['sum_of_depth'])
-                                      / float(totals[level]['instances']))
+                                      / float(max(totals[level]['instances'],
+                                              1)))
     return totals, results
 
 

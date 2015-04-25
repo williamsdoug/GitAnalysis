@@ -335,7 +335,7 @@ def process_commit_diff(c, verbose=False):
     cid = c.hexsha
     if verbose:
         print
-    print 'CID:', cid
+        print 'CID:', cid
     sys.stdout.flush()
     global processDiff
 
@@ -358,7 +358,7 @@ def process_commit_diff(c, verbose=False):
         # An add appears both as an add and a modify with null blob_a
 
         for d in i:
-            if True:  # verbose:
+            if verbose:  # verbose:
                 print
                 print 'A:', d.a_blob,
                 if isValidBlob(d.a_blob):
@@ -491,7 +491,7 @@ def test_all_git_commits(project, verbose=False, limit=-1, skip=-1):
             commits[cid].update(diff_result)
 
             total_operations += 1
-            if total_operations % 100 == 0:
+            if total_operations % 10 == 0:
                 print '.',
             if total_operations % 100 == 0:
                 print total_operations,

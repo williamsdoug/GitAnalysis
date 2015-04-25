@@ -44,15 +44,10 @@
 # from BugFixWorkflow import compute_selected_bug_fixes
 # from BugFixWorkflow import export_feature_vectors_to_csv
 
-import pprint as pp
-import re
+from pprint import pprint
 
-# import collections
-import datetime
-from datetime import date
 import gzip
 import numpy as np
-import git
 from git import Repo
 
 from commit_analysis import load_all_analysis_data
@@ -64,6 +59,7 @@ from commit_analysis import autoset_threshold
 from Git_Extract import assign_blame, get_blame
 from Git_Extract import project_to_fname
 from Git_Extract import process_commit_files_unfiltered, filter_file
+from Git_Extract import get_commit_diff_blob_paths
 from Git_Extract import extract_master_commit
 from Git_Extract import get_all_files_from_commit
 from Git_Extract import author_commiter_same
@@ -379,7 +375,7 @@ def process_complex_merge_bug_fix(c, importance, commits,
             assert (diff_commit)
 
     if verbose:
-        pp.pprint(results)
+        pprint(results)
         print
 
     return results
@@ -480,7 +476,7 @@ def collect_all_bug_fix_commits(commits, importance,
 
     all_sub_branches = get_all_branch_data(commits, importance)
     for k, c in commits.items():
-        # Identified commit to be included during feature extraction
+        # Identifies commit to be included during feature extraction
         c['is_tracked_change'] = False
 
     for k, c in commits.items():
@@ -580,6 +576,10 @@ def collect_all_bug_fix_commits(commits, importance,
 # Blame and Guilt Processing
 #
 
+
+
+
+
 def compute_all_blame(project, guilt_data, combined_commits,
                       clear_cache=False):
     """Computes blame data for commits identified in guilt_data"""
@@ -625,24 +625,25 @@ def compute_all_blame(project, guilt_data, combined_commits,
 
         if bc_key not in blame_cache:
             commit_blame = {}
-            files = process_commit_files_unfiltered(c)
-            subset_files = [f for f in files
-                            if filter_file(f, filter_config)]
-            for path in subset_files:
-                # print 'Getting diff object for path:', path
-                d = c.diff(p, create_patch=True, paths=path)
+            for pair in get_commit_diff_blob_paths(c):
+                # ignore adds and deletes
+                if not (pair['a_path'] and pair['b_path']
+                        and filter_file(pair['a_path'], filter_config)):
+                    continue
+                d = c.diff(p, create_patch=True, paths=pair['a_path'])
                 diff_text = d[0].diff
                 # print diff_text
-                fname, blame_data = assign_blame(path, diff_text,
+                fname, blame_data = assign_blame(pair['b_path'], diff_text,
                                                  be['blame_commit'],
                                                  repo_name,
                                                  be['diff_commit'])
                 commit_blame[fname] = blame_data
+
             blame_cache[bc_key] = commit_blame    # Now populate cache
 
         be['blame'] = blame_cache[bc_key]
 
-        # pp.pprint(be)
+        # pprint(be)
         # print be['diff_commit'], be['blame'].keys()
 
         progress += 1

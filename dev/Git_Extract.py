@@ -6,7 +6,7 @@
 #
 # Currently being tested using OpenStack (Nova, Swift, Glance, Cinder, Heat)
 #
-# Last updated 3/11/2015
+# Last updated 4/23/2015
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -103,11 +103,11 @@
 # - 3/11/15 - Added compute_git_actor_dedupe().
 # - 3/11/15 - Incorporate actor dedupe into annotate_author_order() and
 #             annotate_file_order_by_author()
+# - 4/23/15 - Fix change file identification in process_commit_files_unfiltered
 #
 #
 # Top Level Routines:
 #    from Git_Extract import build_git_commits, load_git_commits
-#    from Git_Extract import build_all_blame, load_all_blame
 #
 #    from Git_Extract import get_git_master_commit, get_authors_and_files
 #    from Git_Extract import filter_bug_fix_commits
@@ -126,19 +126,15 @@
 #     from Git_Extract import compute_git_actor_dedupe()
 #
 
-from git import *
 import git
-import time
-import pprint as pp
+from pprint import pprint
 import collections
-from collections import defaultdict
 import re
-import urllib2
 import datetime
-from datetime import date
 from datetime import datetime as dt
+import sys
 
-from jp_load_dump import convert_to_builtin_type, pload, pdump, jload, jdump
+from jp_load_dump import convert_to_builtin_type, jload, jdump
 from subprocess import Popen, PIPE, STDOUT
 from multiprocessing import Pool
 
@@ -504,30 +500,66 @@ def process_commits(repo, commits, filter_config, max_count=False):
     return commits
 
 
-def process_commit_files_unfiltered(c):
+def isValidBlob(blob):
+    """Helper function to validate non-null blob"""
+    return (blob and str(blob) != git.objects.blob.Blob.NULL_HEX_SHA)
+
+
+def get_all_blob_paths(t):
+    """Iterator recursively walks tre, returning blobs"""
+    for b in t.blobs:
+        yield(b.path)
+    for subtree in t.trees:
+        for b in get_all_blob_paths(subtree):
+            yield(b.path)
+
+
+def get_commit_diff_blob_paths(c, verbose=False):
+    """Determine A and B blobs associated with commit pair"""
+
+    if len(c.parents) > 0:
+        p = c.parents[0]
+        return [{'a_path': d.a_blob.path if isValidBlob(d.a_blob) else None,
+                 'b_path': d.b_blob.path if isValidBlob(d.b_blob) else None}
+                for d in c.diff(p, create_patch=False)]
+
+    elif len(c.parents) == 0:
+        # inaugural commit, so can't use diff
+        return [{'a_path': b, 'b_path': None}
+                for b in get_all_blob_paths(c.tree)]
+
+
+def process_commit_files_unfiltered(c, verbose=False):
     """Determine files associated with an individual commit"""
 
     files = []
     # for p in c.parents:    # iterate through each parent
     if len(c.parents) > 0:
         p = c.parents[0]
-        i = c.diff(p, create_patch=False)
-
-        for d in i.iter_change_type('A'):
-            if d.b_blob:
-                files.append(d.b_blob.path)
-
-        for d in i.iter_change_type('D'):
-            if d.a_blob:
+        for d in c.diff(p, create_patch=False):
+            if False:  # verbose:
+                print
+                print 'A:', d.a_blob,
+                if isValidBlob(d.a_blob):
+                    print d.a_blob.path
+                print 'B:', d.b_blob,
+                if isValidBlob(d.b_blob):
+                    print d.b_blob.path
+                sys.stdout.flush()
+            if not isValidBlob(d.a_blob):
+                if verbose:
+                    print 'Delete'
+                continue
+            elif not isValidBlob(d.b_blob):
+                if verbose:
+                    print 'Add A'
                 files.append(d.a_blob.path)
-
-        for d in i.iter_change_type('R'):
-            if d.b_blob:
-                files.append(d.b_blob.path)
-
-        for d in i.iter_change_type('M'):
-            if d.b_blob:
-                files.append(d.b_blob.path)
+            elif (isValidBlob(d.a_blob) and isValidBlob(d.b_blob)
+                  and d.b_blob.path.endswith('.py')):
+                    files.append(d.b_blob.path)
+    elif len(c.parents) == 0:
+        # inaugural commit, so can't use diff
+        files = [b for b in get_all_blob_paths(c.tree)]
     return files
 
 hdr_re = re.compile('@@\s+-(?P<nstart>\d+)(,(?P<nlen>\d+))?\s+\+'
@@ -543,9 +575,11 @@ def parse_diff(diff_text, proximity_limit=4):
     n_pos = 0
     changes = []
     line_range = []
+    skip = False
     for line in diff_text.split('\n'):
         # print line
         if line.startswith('@@'):
+            skip = False
             # print line
             m = hdr_re.search(line)
             if m:
@@ -562,9 +596,15 @@ def parse_diff(diff_text, proximity_limit=4):
                 except Exception:
                     p_len = 0
 
-                line_range += range(n_start, n_start+n_len)
+                if p_len == 0:  # Special case for null files
+                    skip = True
+                    continue
+
+                line_range += range(p_start, p_start+p_len)
             else:
                 print 'not found', line
+        elif skip:
+            continue
         elif line.startswith('---'):
             delete_flag = False
             pass
@@ -577,16 +617,20 @@ def parse_diff(diff_text, proximity_limit=4):
             n_pos += 1
         elif line.startswith('+'):
             if delete_flag:
-                changes.append(n_pos-1)
+                changes.append(p_pos-1)
             else:
-                changes.append(n_pos-1)
-                changes.append(n_pos)
+                changes.append(p_pos-1)
+                changes.append(p_pos)
             delete_flag = False
             p_pos += 1
         elif line.startswith('-'):
-            changes.append(n_pos)
+            changes.append(p_pos)
             delete_flag = True
             n_pos += 1
+        else:
+            # Typically blank line or ''\ No newline at end of file'
+            # print 'unused line:', line
+            pass
 
     changes = set(sorted(set(changes)))
     window = set(sorted(set(line_range)))
@@ -707,7 +751,7 @@ def build_git_commits(project, update=True, include_patch=False):
     """Top level routine to generate commit data """
 
     repo_name = get_repo_name(project)
-    repo = Repo(repo_name)
+    repo = git.Repo(repo_name)
     assert repo.bare is False
 
     if update:
@@ -778,6 +822,9 @@ def get_blame(cid, path, repo_name,
               include_cc=False, warn=False):
     """Compute per-line blame for individual file for a commit """
 
+    # print 'Calling get_blame', ranges, path
+    warn = True
+
     result = []
     entry = {}
     first = True      # identifies first line in each porcelin group
@@ -790,6 +837,8 @@ def get_blame(cid, path, repo_name,
         cmd += '-C -C '
     cmd += cid + ' -- ' + path   # specify commit and filename
 
+    # print cmd
+
     # Now execute git blame command in subprocess and parse results
     with Popen(cmd, shell=True, stdout=PIPE, stderr=STDOUT).stdout as f:
         for line in f:
@@ -801,11 +850,12 @@ def get_blame(cid, path, repo_name,
                 print type(line), line
                 raise Exception
 
-            if 'fatal: no such path' in line:
+            if line.startswith('fatal:'):
                 if warn:
-                    print line,
+                    print 'Warning --', line,
                     print 'child cid:', child_cid
                     print 'parent cid:', cid
+                    print 'command:', cmd
                 return False
 
             if first:
@@ -855,22 +905,43 @@ def find_diff_ranges(entries):
 def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
     """Combine diff with blame for a file"""
     try:
-        result = parse_diff(diff_text)
-        ranges = find_diff_ranges(result)
+        if '+++ /dev/null' in diff_text:
+            return [path, False]
 
+        result = parse_diff(diff_text)
+        # print 'parse_diff:'
+        # pprint(result)
+
+        if not result:  # skip if empty
+            return [path, False]
+
+        ranges = find_diff_ranges(result)
+        # print 'ranges'
+        # pprint(ranges)
+        
         # now annotate with blame information
         blame = dict([(int(x['lineno']), x)
                       for x in get_blame(p_cid, path, repo_name,
                                          child_cid=child_cid,
                                          ranges=ranges)])
+        # print 'Blame:'
+        # pprint(blame)
         result = [dict(x.items() + [['commit', blame[x['lineno']]['commit']]])
                   for x in result if x['lineno'] in blame]
 
         return [path, result]
 
     except Exception:
+        print 'Exception'
+        assert False
         return [path, False]
 
+
+#
+# Note: process_commit_details appears to be obsolete, replaced with
+# BugFixWorkflow / compute_all_blame.  However, assign_blame appears to
+# still be used
+#
 
 def process_commit_details(cid, repo, repo_name, filter_config):
     """Process individual commit, computing diff and identifying blame.
@@ -1205,7 +1276,7 @@ def annotate_commit_loc(commits, project, clear_cache=False):
 
 def get_git_master_commit(repo_name):
     """Returns ID of most recent commit"""
-    repo = Repo(repo_name)
+    repo = git.Repo(repo_name)
     return repo.heads.master.commit.hexsha
 
 
