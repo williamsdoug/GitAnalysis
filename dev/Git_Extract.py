@@ -6,7 +6,7 @@
 #
 # Currently being tested using OpenStack (Nova, Swift, Glance, Cinder, Heat)
 #
-# Last updated 4/23/2015
+# Last updated 4/26/2015
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -104,6 +104,8 @@
 # - 3/11/15 - Incorporate actor dedupe into annotate_author_order() and
 #             annotate_file_order_by_author()
 # - 4/23/15 - Fix change file identification in process_commit_files_unfiltered
+# - 4/26/15 - Integrate PyDiff and and process_commit_diff feature extraction
+#             from language_feature
 #
 #
 # Top Level Routines:
@@ -140,6 +142,8 @@ from multiprocessing import Pool
 
 from git_analysis_config import get_filter_config
 from git_analysis_config import get_repo_name, get_corpus_dir
+
+from language_feature import process_commit_diff
 
 
 #
@@ -447,14 +451,18 @@ def parse_msg(msg, patch=False):
 # Basic Commit Processing
 #
 
-def process_commits(repo, commits, filter_config, max_count=False):
-    """Extracts all commit from git repo, subject to max_count limit"""
+def process_commits(repo, commits, filter_config,
+                    skip=-1, limit=-1, verbose=False, use_pydiff=False):
+    """Extracts all commit from git repo, subject to limit"""
     total_operations = 0
     total_errors = 0
 
     for h in repo.heads:
         for c in repo.iter_commits(h):
-            # for c in repo.iter_commits('master', max_count=max_count):
+            if skip > 0:
+                skip -= 1
+                continue
+
             cid = c.hexsha
             if cid in commits:
                 continue
@@ -473,15 +481,22 @@ def process_commits(repo, commits, filter_config, max_count=False):
                                      if filter_file(f, filter_config)]
 
             commits[cid].update(parse_msg(c.message))
+            if use_pydiff:
+                diff_result = process_commit_diff(c, filter_config,
+                                                  verbose=verbose)
+                commits[cid].update(diff_result)
+
             total_operations += 1
             if total_operations % 100 == 0:
                 print '.',
+                sys.stdout.flush()
             if total_operations % 1000 == 0:
                 print total_operations,
+                sys.stdout.flush()
 
-            """except Exception:
-                print 'x',
-                total_errors += 1"""
+            limit -= 1
+            if limit == 0:
+                return commits
 
     if total_errors > 0:
         print
@@ -747,7 +762,8 @@ def annotate_mainline(commits, master_commit, runaway=1000000):
 #
 
 
-def build_git_commits(project, update=True, include_patch=False):
+def build_git_commits(project, update=True, include_patch=False,
+                      use_pydiff=False, skip=-1, limit=-1, verbose=False):
     """Top level routine to generate commit data """
 
     repo_name = get_repo_name(project)
@@ -764,7 +780,9 @@ def build_git_commits(project, update=True, include_patch=False):
     if not update:
         commits = collections.defaultdict(list)
 
-    commits = process_commits(repo, commits, get_filter_config(project))
+    commits = process_commits(repo, commits, get_filter_config(project),
+                              use_pydiff=use_pydiff, skip=skip, limit=limit,
+                              verbose=verbose)
     print
     print 'total commits:', len(commits)
     """
@@ -918,7 +936,7 @@ def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
         ranges = find_diff_ranges(result)
         # print 'ranges'
         # pprint(ranges)
-        
+
         # now annotate with blame information
         blame = dict([(int(x['lineno']), x)
                       for x in get_blame(p_cid, path, repo_name,

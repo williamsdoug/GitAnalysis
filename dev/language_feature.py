@@ -1,9 +1,26 @@
+#
+# language_feature.py - Language-specific processing for Python, including
+#                       change detection and language_related feature
+#                       extraction.  Primary integration with Git_Extract.
+#
+# Author:  Doug Williams - Copyright 2015
+#
+# Last updated 4/26/2015
+#
+# History:
+# - 4/21/15 - Initial version of file
+# - 4/26/15 - Integrate PyDiff and and process_commit_diff feature extraction
+#             from language_feature
+#
+#
+# Top Level Routines:
+#
+# from language_feature import process_commit_diff
+#
+
 import ast
 from pprint import pprint
-# import fnmatch
-# import os
 import collections
-# import hashlib
 import re
 from git import Repo
 import git
@@ -15,12 +32,33 @@ import radon.complexity
 import radon.raw
 import radon.metrics
 
-from git_analysis_config import get_repo_name
-
+from git_analysis_config import get_repo_name, get_filter_config
 from python_introspection import get_total_nodes
 from python_introspection import getDepth
-
 from PythonDiff import pythonDiff
+
+
+#
+# WARNING HACK: Clones of functions from Git_Extract duplicatee to avoid
+# interdependent imports.  To Do: Clean-up
+#
+
+
+# from Git_Extract import isValidBlob
+def isValidBlob(blob):
+    """Helper function to validate non-null blob"""
+    return (blob and str(blob) != git.objects.blob.Blob.NULL_HEX_SHA)
+
+
+# from Git_Extract import filter_file
+def filter_file(fname, filter_config):
+    for prefix in filter_config['exclude_prefix']:
+        if fname.startswith(prefix):
+            return False
+    for suffix in filter_config['include_suffix']:
+        if fname.endswith(suffix):
+            return True
+    return False
 
 
 def printSubtree(subtrees, level=0, indent=2):
@@ -324,12 +362,7 @@ def process_commit_add(d, verbose=False):
             'cc': complexity}
 
 
-def isValidBlob(blob):
-    """Helper function to validate non-null blob"""
-    return (blob and str(blob) != git.objects.blob.Blob.NULL_HEX_SHA)
-
-
-def process_commit_diff(c, verbose=False):
+def process_commit_diff(c, filter_config, verbose=False):
     """Apply language sensitive diff to each changed file"""
     # global START
     cid = c.hexsha
@@ -337,14 +370,6 @@ def process_commit_diff(c, verbose=False):
         print
         print 'CID:', cid
     sys.stdout.flush()
-    global processDiff
-
-    # if cid == '1720438185bdac62e11ba83367d6b3c606934a56':  #last bug
-    # if cid == '340cae5466eaf5568c4f0eecb2a2fa7cdbcc0ba4':
-    #    #verbose = True
-    #    START = True
-    # if not START:
-    #    return {}
 
     files = []
     results = []
@@ -370,11 +395,13 @@ def process_commit_diff(c, verbose=False):
 
             if ((not d.a_blob and not d.b_blob)
                 or
-                (isValidBlob(d.a_blob) and (not d.a_blob.path.endswith('.py')
-                                            or 'test' in d.a_blob.path))
+                (isValidBlob(d.a_blob)
+                 and (not filter_file(d.a_blob.path, filter_config)
+                      or not d.a_blob.path.endswith('.py')))
                 or
-                (isValidBlob(d.b_blob) and (not d.b_blob.path.endswith('.py')
-                                            or 'test' in d.b_blob.path))):
+                (isValidBlob(d.b_blob)
+                 and (not filter_file(d.b_blob.path, filter_config)
+                      or not d.b_blob.path.endswith('.py')))):
                 if verbose:
                     print 'skipping'
                 continue
@@ -464,15 +491,28 @@ def processDiff(d, verbose=False):
             'cc': total_complexity}
 
 
+#
+# Debug code, should be deletedonce no longer needed
+#
+
 def test_all_git_commits(project, verbose=False, limit=-1, skip=-1):
     """Top level routine to generate commit data """
 
     repo_name = get_repo_name(project)
     repo = Repo(repo_name)
+    filter_config = get_filter_config(project)
     assert repo.bare is False
 
     commits = collections.defaultdict(list)
+    new_process_commits(repo, commits, filter_config,
+                        skip=skip, verbose=verbose, limit=limit)
+
+
+def new_process_commits(repo, commits, filter_config,
+                        skip=-1, limit=-1, verbose=False):
+    """Extracts all commit from git repo, subject to max_count limit"""
     total_operations = 0
+    total_errors = 0
 
     for h in repo.heads:
         for c in repo.iter_commits(h):
@@ -487,7 +527,8 @@ def test_all_git_commits(project, verbose=False, limit=-1, skip=-1):
                 continue
             # try:
             commits[cid] = {}
-            diff_result = process_commit_diff(c, verbose=verbose)
+            diff_result = process_commit_diff(c, filter_config,
+                                              verbose=verbose)
             commits[cid].update(diff_result)
 
             total_operations += 1
