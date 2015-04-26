@@ -521,12 +521,12 @@ def isValidBlob(blob):
 
 
 def get_all_blob_paths(t):
-    """Iterator recursively walks tre, returning blobs"""
+    """Iterator recursively walks tree, returning blobs"""
     for b in t.blobs:
         yield(b.path)
     for subtree in t.trees:
         for b in get_all_blob_paths(subtree):
-            yield(b.path)
+            yield(b)
 
 
 def get_commit_diff_blob_paths(c, verbose=False):
