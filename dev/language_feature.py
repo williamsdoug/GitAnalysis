@@ -10,7 +10,8 @@
 # History:
 # - 4/21/15 - Initial version of file
 # - 4/26/15 - Integrate PyDiff and and process_commit_diff feature extraction
-#             from language_feature
+#             from language_feature.
+# - 4/26/15 - Enrich test-related metrics
 #
 #
 # Top Level Routines:
@@ -33,7 +34,7 @@ import radon.raw
 import radon.metrics
 
 from git_analysis_config import get_repo_name, get_filter_config
-from python_introspection import get_total_nodes
+from python_introspection import get_total_nodes, get_stats
 from python_introspection import getDepth
 from PythonDiff import pythonDiff
 
@@ -267,21 +268,35 @@ def getMetrics(blob, result, verbose=True):
 
 
 def aggregateMetrics(entries):
-    pprint(entries)
-    print
     results = {}
     results['cc'] = sum([e['cc'] for e in entries
                          if 'test' not in e['name']])
+    results['test_cc'] = sum([e['cc'] for e in entries
+                              if 'test' in e['name']])
     results['changes'] = sum([e['changes'] for e in entries
                               if 'test' not in e['name']])
+    results['test_changes'] = sum([e['changes'] for e in entries
+                                   if 'test' in e['name']])
     results['complexity'] = sum([e['complexity'] for e in entries
                                  if 'test' not in e['name']])
+    results['test_complexity'] = sum([e['complexity'] for e in entries
+                                      if 'test' in e['name']])
+    results['new_functions'] = sum([e['new_functions'] for e in entries
+                                    if 'test' not in e['name']])
+    results['test_new_functions'] = sum([e['new_functions'] for e in entries
+                                         if 'test' in e['name']])
+    results['new_classes'] = sum([e['new_classes'] for e in entries
+                                  if 'test' not in e['name']])
+    results['test_new_classes'] = sum([e['new_classes'] for e in entries
+                                       if 'test' in e['name']])
     results['lloc'] = sum([e['lloc'] for e in entries
                            if 'test' not in e['name']])
     results['test_lloc'] = sum([e['lloc'] for e in entries
                                 if 'test' in e['name']])
     results['nodes'] = sum([e['nodes'] for e in entries
                             if 'test' not in e['name']])
+    results['test_nodes'] = sum([e['nodes'] for e in entries
+                                 if 'test' in e['name']])
 
     results['avg_expr_depth'] = \
         (float(sum([e['depth']['expr']['sum_of_depth']
@@ -327,9 +342,11 @@ def computeChanges(tree):
     """Computes node changes and cyclomatic complex for a set of ast edits"""
     changes = 0
     complexity = 0
+    new_functions = 0
+    new_classes = 0
 
     if tree['full_match']:
-        return changes, complexity
+        return changes, complexity, new_functions, new_classes
     if tree['pair']:
         if not tree['node_match']:
             changes += 1
@@ -340,15 +357,25 @@ def computeChanges(tree):
 
         if 'subtrees' in tree:
             for subtree in tree['subtrees']:
-                this_change, this_cc = computeChanges(subtree)
+                (this_change, this_cc,
+                 this_functions, this_classes) = computeChanges(subtree)
                 changes += this_change
                 complexity += this_cc
+                new_functions += this_functions
+                new_classes += this_classes
     else:
-        stats = get_total_nodes(tree['ast'])
-        changes += stats
+        changes += get_total_nodes(tree['ast'])
         complexity += get_cc(tree['ast'])
 
-    return changes, complexity
+        if (isinstance(tree['ast'], ast.FunctionDef)
+            or isinstance(tree['ast'], ast.FunctionDef)
+            or isinstance(tree['ast'], ast.Module)
+            ):
+                stats = get_stats(tree['ast'])
+                new_functions += stats['total_functions']
+                new_classes += stats['total_classes']
+
+    return changes, complexity, new_functions, new_classes
 
 
 def process_commit_add(d, verbose=False):
@@ -357,9 +384,12 @@ def process_commit_add(d, verbose=False):
     st, txt = get_st_from_blob(d.a_blob)
     changes = get_total_nodes(st)
     complexity = get_cc(st)
+    stats = get_stats(st)
     return {'name': d.a_blob.path,
             'changes': changes,
-            'cc': complexity}
+            'cc': complexity,
+            'new_functions': stats['total_functions'],
+            'new_classes': stats['total_classes']}
 
 
 def process_commit_diff(c, filter_config, verbose=False):
@@ -426,8 +456,8 @@ def process_commit_diff(c, filter_config, verbose=False):
                   and d.b_blob.path.endswith('.py')):
                     try:
                         result = processDiff(d, verbose=verbose)
-                        print '*',
-                        sys.stdout.flush()
+                        # print '*',
+                        # sys.stdout.flush()
                         if result['changes'] > 0:
                             getMetrics(d.b_blob, result, verbose=True)
                             results.append(result)
@@ -438,9 +468,15 @@ def process_commit_diff(c, filter_config, verbose=False):
             else:
                 raise Exception('Unknown change format')
 
-    if verbose and len(results) > 0:
-        pprint(aggregateMetrics(results))
-    return {'files': files}
+    ret = {}
+    if len(results) > 0:
+        ret = {'individual': {x['name']: x for x in results},
+               'aggregate': aggregateMetrics(results)}
+        if verbose:
+            print 'Metrics:'
+            pprint(ret)
+            print
+    return ret
 
 
 def processDiff(d, verbose=False):
@@ -476,23 +512,31 @@ def processDiff(d, verbose=False):
 
     total_changes = 0
     total_complexity = 0
+    total_new_functions = 0
+    total_new_classes = 0
     for tree in subtreeB:
-        changes, cc = computeChanges(tree)
+        changes, cc, new_functions, new_classes = computeChanges(tree)
         total_changes += changes
         total_complexity += cc
+        total_new_functions += new_functions
+        total_new_classes += new_classes
         # print 'Changes:', changes, 'CC:', cc
     if verbose:
         print 'Change nodes:', total_changes,
         print 'Change complexity:', total_complexity
+        print 'New functions', total_new_functions
+        print 'New classes', total_new_classes
         print
 
     return {'name': d.b_blob.path,
             'changes': total_changes,
+            'new_functions': total_new_functions,
+            'new_classes': total_new_classes,
             'cc': total_complexity}
 
 
 #
-# Debug code, should be deletedonce no longer needed
+# Debug code, should be deleted once no longer needed
 #
 
 def test_all_git_commits(project, verbose=False, limit=-1, skip=-1):
