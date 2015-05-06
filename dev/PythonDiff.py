@@ -115,7 +115,7 @@ def getTargetName(node):
                   if v and 'object at 0x' not in repr(v)]
         if params:
             result = result + '+' + '+'.join(params)
-        print 'getTargetName: default format - ', result
+        # print 'getTargetName: default format - ', result
         return result
 
 
