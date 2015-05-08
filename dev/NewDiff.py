@@ -3,10 +3,11 @@
 #
 # Author:  Doug Williams - Copyright 2015
 #
-# Last updated 5/5/2015
+# Last updated 5/8/2015
 #
 # History:
 # - 5/5/15 - Initial version of file
+# - 5/8/15 - Continued active development
 #
 #
 # Top Level Routines:
@@ -77,12 +78,62 @@ import itertools
 # from git_analysis_config import get_repo_name
 
 
-# from: http://stackoverflow.com/questions/3312989/elegant-way-to-test-python-asts-for-equality-not-reference-or-object-identity
+def debug_ast_strip_lineno(line):
+    """Strips lineno and col_offset from ast.dump output"""
+    line = re.sub(r",?\s+lineno=-?\d+", "", line)
+    line = re.sub(r",?\s+col_offset=-?\d+", "", line)
+    return line
+
+
+def debugSanityCheckDump(node):
+    """Validates that dump is behaving correctly,
+    should be removed after debug"""
+    if (ast.dump(node, include_attributes=False)
+            != debug_ast_strip_lineno(ast.dump(node,
+                                      include_attributes=True))):
+        string1 = ast.dump(node, include_attributes=False)
+        string2 = debug_ast_strip_lineno(ast.dump(node,
+                                         include_attributes=True))
+        print
+        print 'compare_ast mismatch'
+        print string1
+        print
+        print string2
+        print len(string1) == len(string2)
+        differences = [i for i in range(min(len(string1), len(string2)))
+                       if string1[i] != string2[i]]
+        print differences
+        print [string1[i] for i in differences]
+        print
+        print [string2[i] for i in differences]
+        assert False
+    return True
+
 
 def compare_ast(node1, node2):
+    """My version of compare_ast based on ast.dump"""
     if type(node1) is not type(node2):
         return False
     if isinstance(node1, ast.AST):
+        debugSanityCheckDump(node1)
+        debugSanityCheckDump(node2)
+        return (ast.dump(node1, include_attributes=False)
+                == ast.dump(node2, include_attributes=False))
+
+    elif isinstance(node1, list):
+        return all(itertools.starmap(compare_ast,
+                                     itertools.izip(node1, node2)))
+    else:
+        return node1 == node2
+
+
+# from: http://stackoverflow.com/questions/3312989/elegant-way-to-test-python-asts-for-equality-not-reference-or-object-identity
+
+def old_compare_ast(node1, node2, debug=True):
+    if type(node1) is not type(node2):
+        return False
+    if isinstance(node1, ast.AST):
+
         for k, v in vars(node1).iteritems():
             if k in ('lineno', 'col_offset', 'ctx'):
                 continue
@@ -341,16 +392,18 @@ def buildTree_helper(tree, match, treeIdx, text):
     tree['insert'] = sum([1 for i in range(tree['start'], tree['end']+1)
                           if match[i] and match[i].endswith('_insert')])
 
-    """if ((tree['mismatch'] > 0 or tree['insert'] > 0)
-        and (isinstance(tree['ast'], ast.Module)
-             or isinstance(tree['ast'], ast.ClassDef)
-             or isinstance(tree['ast'], ast.FunctionDef))):"""
-
-    if (isinstance(tree['ast'], ast.Module)
-        or isinstance(tree['ast'], ast.ClassDef)
-            or isinstance(tree['ast'], ast.FunctionDef)):
+    if type(tree['ast']) in [ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.If, ast.For, ast.While, ast.With]:
+        # body
         subtrees = [newTree(st, treeIdx, parentTree=tree, start=st.lineno)
                     for st in tree['ast'].body]
+        # orelse
+        if type(tree['ast']) in [ast.If, ast.For, ast.While]:
+            subtrees += [newTree(st, treeIdx, parentTree=tree, start=st.lineno)
+                         for st in tree['ast'].orelse]
+        #
+        # Common back-end processing
+        #
         all_start = [x['start'] for x in subtrees] + [tree['end']]
 
         for i, subtree in enumerate(subtrees):
@@ -375,6 +428,9 @@ def buildTree_helper(tree, match, treeIdx, text):
                                                       firstSubtreeLineno)
                                        if not match[i]])
 
+    if type(tree['ast']) in [ast.If, ast.For, ast.With, ast.While,
+                             ast.TryFinally, ast.TryExcept, ast.ExceptHandler]:
+        print 'found', type(tree['ast'])
 
 def blankLineTrimmer(tree, text):
     """Update start and end values to eliminate blank lines"""
@@ -401,7 +457,8 @@ def tokenMapper(tree, tokenMap, idxTree, side='A'):
             tokenMapper(idxTree[i], tokenMap, idxTree, side=side)
 
 
-def computePairs(tree, tokenMap, idxTree, otherIdxTree, thisSide='A'):
+def computePairs(tree, tokenMap, idxTree, otherIdxTree,
+                 thisSide='A', verbose=False):
     pairs = []
 
     if thisSide == 'A':
@@ -429,31 +486,36 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree, thisSide='A'):
 
     if len(pairs) == 1:
         tree['pair'] = pairs[0]['idxSelf']
-        print 'Pairing:', tree['idxSelf'], 'with', tree['pair']
+        if verbose:
+            print 'Pairing:', tree['idxSelf'], 'with', tree['pair']
 
     elif len(pairs) == 0:
-        print 'ID:', tree['idxSelf'],
-        print 'Currently Unmatched - mismatch count:', tree['mismatch'],
-        print 'Tokens:', len(tree['tokens'])
+        # print 'ID:', tree['idxSelf'],
+        # print 'Currently Unmatched - mismatch count:', tree['mismatch'],
+        # print 'Tokens:', len(tree['tokens'])
         if 'subtreesIdx' in tree:
-            print '    Subtrees:', len(tree['subtreesIdx'])
+            # print '    Subtrees:', len(tree['subtreesIdx'])
+            pass
 
         # Try to match based on children:
         if 'subtreesIdx' in tree:
             candidatePairs = []
             for i in tree['subtreesIdx']:
                 if 'pair' in idxTree[i]:
-                    print 'subtree match', idxTree[i]['idxSelf'], idxTree[i]['pair']
-                    print '      parents', idxTree[i]['idxParent'],
-                    print otherIdxTree[idxTree[i]['pair']]['idxParent']
+                    # print 'subtree match', idxTree[i]['idxSelf'], idxTree[i]['pair']
+                    # print '      parents', idxTree[i]['idxParent'],
+                    # print otherIdxTree[idxTree[i]['pair']]['idxParent']
                     if (otherIdxTree[idxTree[i]['pair']]['idxParent']
                             not in candidatePairs):
                         candidatePairs.append(
                             otherIdxTree[idxTree[i]['pair']]['idxParent'])
 
-            print 'Candidate parents:', candidatePairs
+            # print 'Candidate parents:', candidatePairs
             if len(candidatePairs) == 1:
                 tree['pair'] = candidatePairs[0]
+                if verbose:
+                    print 'Pairing:', tree['idxSelf'], 'with', tree['pair'],
+                    print 'via subtree matches'
                 otherIdxTree[candidatePairs[0]]['pair'] = tree['idxSelf']
 
     else:
@@ -491,7 +553,7 @@ def okToPair(tree1, tree2):
         return False
 
 
-def inferPairs(tree, thisIdx, otherIdx):
+def inferPairs(tree, thisIdx, otherIdx, verbose=False):
     """Infer pairs based on neighboring pairs in subtree"""
 
     if ('pair' not in tree or tree['mismatch'] == 0
@@ -522,14 +584,16 @@ def inferPairs(tree, thisIdx, otherIdx):
 
         # see if unmatched items can be linked
         if okToPair(thisIdx[thisSubtrees[0]], otherIdx[otherSubtrees[0]]):
-            print 'Pair Found at start', thisSubtrees[0], otherSubtrees[0]
+            if verbose:
+                print 'Pair Found at start', thisSubtrees[0], otherSubtrees[0]
             thisSubtrees = thisSubtrees[1:]
             otherSubtrees = otherSubtrees[1:]
             continue
 
         # determine which ones to ignore (look 1 further for each)
         if okToPair(thisIdx[thisSubtrees[-1]], otherIdx[otherSubtrees[-1]]):
-            print 'Pair found at end', thisSubtrees[-1], otherSubtrees[-1]
+            if verbose:
+                print 'Pair found at end', thisSubtrees[-1], otherSubtrees[-1]
             thisSubtrees = thisSubtrees[:-1]
             otherSubtrees = otherSubtrees[:-1]
             continue
@@ -547,19 +611,40 @@ def pruneDetail(tree, idxTree):
                 pruneDetail(idxTree[i], idxTree)
 
 
-def validateMismatches(tree, thisIdx, otherIdx):
+def ignoreDocstrings(tree, idxTree, verbose=False):
+    """Ignore any mismatch in doc_strings"""
+    if ('subtreesIdx' in tree
+        and (isinstance(tree['ast'], ast.Module)
+             or isinstance(tree['ast'], ast.ClassDef)
+             or isinstance(tree['ast'], ast.FunctionDef))):
+        firstLine = idxTree[tree['subtreesIdx'][0]]
+        if (firstLine['mismatch'] > 0
+                and isinstance(firstLine['ast'], ast.Expr)
+                and isinstance(firstLine['ast'].value, ast.Str)):
+            if verbose:
+                print '    ignoring docstring', tree['idxSelf'],
+                print firstLine['idxSelf']
+            tree['mismatch'] -= firstLine['mismatch']
+            firstLine['mismatch'] = 0
+    if 'subtreesIdx' in tree:
+        for i in tree['subtreesIdx']:
+            ignoreDocstrings(idxTree[i], idxTree)
+
+
+def validateMismatches(tree, thisIdx, otherIdx, verbose=False):
     """Depth first check of mismatch pairs"""
 
     if 'pair' not in tree:
         return
 
     old_mismatch = tree['mismatch']
-    if 'header_mismatch' in tree:
-        new_mismatch = tree['header_mismatch']
-    else:
-        new_mismatch = 0
+    new_mismatch = old_mismatch
 
     if 'subtreesIdx' in tree:
+        if 'header_mismatch' in tree:
+            new_mismatch = tree['header_mismatch']
+        else:
+            new_mismatch = 0
         for i in tree['subtreesIdx']:
             validateMismatches(thisIdx[i], thisIdx, otherIdx)
         # recompute mismatch count
@@ -568,91 +653,111 @@ def validateMismatches(tree, thisIdx, otherIdx):
 
     # Now compare this node
     otherTree = otherIdx[tree['pair']]
+
+    if old_mismatch != new_mismatch:
+        if verbose:
+            print '    Updating mismatches for:', tree['idxSelf'],
+            print 'was:', old_mismatch, 'now:', new_mismatch
+        tree['mismatch'] = new_mismatch
     if old_mismatch > 0 and compare_ast(tree['ast'], otherTree['ast']):
+        if verbose:
+            print '-'*40
+            print 'Match found'
+            print ast.dump(tree['ast'], include_attributes=False)
+            print
+            print ast.dump(otherTree['ast'], include_attributes=False)
+
         tree['mismatch'] = 0
         if 'header_mismatch' in tree:
             tree['header_mismatch'] = 0
-        print 'Match:', tree['idxSelf'], otherTree['idxSelf']
-    else:
-        tree['mismatch'] = new_mismatch
+        if verbose:
+            print '    Match:', tree['idxSelf'], otherTree['idxSelf']
 
 
-def performDiff(d):
+def performDiff(d, verbose=True):
     """Perform diff operation on individual file"""
     if not d.b_blob or not d.b_blob.path.endswith('.py'):
         print 'Error:  Invalid blob for performDiff', d.b_blob
         assert False
-    print
-    print '+'*60
-    print
-    print 'Comparing ', d.b_blob.path
-    if d.a_blob.path != d.b_blob.path:
-        print '    With', d.b_blob.path
+    if verbose:
+        print
+        print '+'*60
+        print
+        print 'Comparing ', d.b_blob.path
+        if d.a_blob.path != d.b_blob.path:
+            print '    With', d.b_blob.path
 
     matchA, matchB = parse_diff_txt(d.diff, d.a_blob, d.b_blob)
 
     st_a = get_st_from_blob(d.a_blob)
     treeA, idxA = buildTree(st_a, len(matchA) - 1, matchA,
                             getBlobData(d.a_blob))
-    if False:
-        print
-        print '***Tree A ***'
-        treeViewer(treeA, idxA)
-        print '*'*40
-        # pprint(treeA)
 
     st_b = get_st_from_blob(d.b_blob)
     treeB, idxB = buildTree(st_b, len(matchB) - 1, matchB,
                             getBlobData(d.b_blob))
-    if False:
-        print
-        print '***Tree B ***'
-        treeViewer(treeB, idxB)
 
-    print
-    print 'Token Mapper'
+    if verbose:
+        print
+        print 'Token Mapper'
     tokenMap = collections.defaultdict(dict)
     tokenMapper(treeA, tokenMap, idxA, side='A')
     tokenMapper(treeB, tokenMap, idxB, side='B')
 
-    print 'Compute pairings:'
+    if verbose:
+        print 'Compute pairings:'
     computePairs(treeA, tokenMap, idxA, idxB, thisSide='A')
-    print '-'*20
+    if verbose:
+        print '-'*20
     computePairs(treeB, tokenMap, idxB, idxA, thisSide='B')
 
-    print
-    print '***Tree A ***'
-    treeViewer(treeA, idxA, trim=True, idxOther=idxB)
-    print '*'*40
-    print
-    print '***Tree B ***'
-    treeViewer(treeB, idxB, trim=True, idxOther=idxA)
-
-    print
-    print 'Infer additional pairings'
+    if verbose:
+        print
+        print 'Infer additional pairings:'
     for tree in idxA:
         inferPairs(tree, idxA, idxB)
 
-    print
-    print 'Comparing Pairs:'
-    # validateMismatches(treeA, idxA, idxB)
-    # validateMismatches(treeB, idxB, idxA)
+    if verbose:
+        print
+        print 'Ignore Docstrings:'
+    ignoreDocstrings(treeA, idxA)
+    ignoreDocstrings(treeB, idxB)
 
     # pruneDetail(treeA, idxA)
     # pruneDetail(treeB, idxB)
 
-    print
-    print '***Tree A ***'
-    treeViewer(treeA, idxA, trim=True, idxOther=idxB)
-    print '*'*40
-    print
-    print '***Tree B ***'
-    treeViewer(treeB, idxB, trim=True, idxOther=idxA)
+    if verbose:
+        print
+        print '***Tree A ***'
+        treeViewer(treeA, idxA, trim=False, idxOther=idxB)
+        print '*'*40
+        print
+        print '***Tree B ***'
+        treeViewer(treeB, idxB, trim=False, idxOther=idxA)
 
-    """print
-    print '***Tree A ***'
-    treeViewer(treeA, idxA, trim=False)
-    print '*'*40
-    print
-    print '***Tree B ***'
-    treeViewer(treeB, idxB, trim=False)"""
+    if verbose:
+        print
+        print 'Comparing Pairs:'
+        print '  Side A:'
+    validateMismatches(treeA, idxA, idxB)
+    if verbose:
+        print '  Side B:'
+    validateMismatches(treeB, idxB, idxA)
+
+    if True:
+        print
+        print '***Tree A ***'
+        treeViewer(treeA, idxA, trim=True, idxOther=idxB)
+        print '*'*40
+        print
+        print '***Tree B ***'
+        treeViewer(treeB, idxB, trim=True, idxOther=idxA)
+
+    if False:
+        print
+        print '***Tree A ***'
+        treeViewer(treeA, idxA, trim=False)
+        print '*'*40
+        print
+        print '***Tree B ***'
+        treeViewer(treeB, idxB, trim=False)
