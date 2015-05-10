@@ -487,11 +487,12 @@ def remove_invalid_tokens(tokens, tree, idxTree):
 
 def cleanup_matches(tree, pairs, idxTree, otherIdxTree, tokenMap):
     """Clean-up spurious matches (ie: other values in pairs)"""
-    print 'selected pair:', tree['pair']
+    if 'pair' in tree:
+        print 'selected pair:', tree['pair']
     print 'Other candidates to be ignored'
     tokens_to_ignore = set([])
     for p in pairs:
-        if p['idxSelf'] == tree['pair']:
+        if 'pair' in tree and p['idxSelf'] == tree['pair']:
             continue
 
         # Compute intersection to determine tokens and
@@ -570,7 +571,7 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree,
                             otherIdxTree[idxTree[i]['pair']]['idxParent'])
 
             # print 'Candidate parents:', candidatePairs
-            print 'Candidate pair count:', len(candidatePairs)
+            # print 'Candidate pair count:', len(candidatePairs)
             if len(candidatePairs) == 1:
                 tree['pair'] = candidatePairs[0]
                 if verbose:
@@ -610,7 +611,9 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree,
                             otherIdxTree, tokenMap)
         else:
             print 'Unable to identify pair'
-            assert False
+            # remove all overlapping tokens
+            cleanup_matches(tree, pairs, idxTree,
+                            otherIdxTree, tokenMap)
 
 
 def okToPair(tree1, tree2):
