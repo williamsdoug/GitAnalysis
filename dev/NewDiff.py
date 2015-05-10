@@ -268,7 +268,7 @@ def getBlobData(blob):
     return blob.data_stream.read().splitlines()
 
 
-def parse_diff_txt(txt, a_blob, b_blob, verbose=False):
+def parse_diff_txt(txt, a_blob, b_blob, verbose=False, debug=False):
     """Parses git diff, returning line numbers containing changes.
     Per-line values in matchA and matchB:
         None => Mismatch
@@ -297,18 +297,25 @@ def parse_diff_txt(txt, a_blob, b_blob, verbose=False):
 
     lines = txt.split('\n')
     for line in lines:
+        if debug:
+            print '*', line
         if line.startswith('@@'):   # Start of diff hunk
             range_info = line.split('@@')[1]
             match = re.search(minus_re, range_info)  # -start, len
             if match:
                 txt = match.group()
                 lineA = int(txt[1:])
+                if lineA == 0:   # special-case for first line inserts
+                    curA = 0
             match = re.search(plus_re, range_info)   # +start, len
             if match:
                 txt = match.group()
                 lineB = int(txt[1:])
+                if lineB == 0:   # special-case for first line inserts
+                    curB = 0
 
-            # print curA, lineA, curB, lineB
+            if debug:
+                print curA, lineA, curB, lineB
             assert (lineA - lineB) == (curA - curB)
 
             while curA < lineA:
@@ -316,20 +323,28 @@ def parse_diff_txt(txt, a_blob, b_blob, verbose=False):
                 matchB[curB] = curA
                 curA += 1
                 curB += 1
+            if debug:
+                print '= curA', curA, 'curB', curB
             continue
         elif line.startswith('--- a/'):
             continue
         elif line.startswith('+++ b/'):
             continue
         elif line.startswith('-'):
+            if debug:
+                print 'curA', curA
             changesA.append(lineA)
             lineA += 1
             curA += 1
         elif line.startswith('+'):
+            if debug:
+                print 'curB', curB
             changesB.append(lineB)
             lineB += 1
             curB += 1
         elif line.startswith(' '):
+            if debug:
+                print 'curA', curA, 'curB', curB
             if verbose:
                 print 'A/B', line
             matchA[curA] = curB
@@ -340,6 +355,8 @@ def parse_diff_txt(txt, a_blob, b_blob, verbose=False):
             lineB += 1
 
     while curA < len(matchA):
+            if debug:
+                print '+ curA', curA, 'curB', curB
             matchA[curA] = curB
             matchB[curB] = curA
             curA += 1

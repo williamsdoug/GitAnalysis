@@ -620,10 +620,10 @@ def parse_diff(diff_text, proximity_limit=4):
                 print 'not found', line
         elif skip:
             continue
-        elif line.startswith('---'):
+        elif line.startswith('--- a/'):
             delete_flag = False
             pass
-        elif line.startswith('+++'):
+        elif line.startswith('+++ b/'):
             delete_flag = False
             pass
         elif line.startswith(' '):
@@ -763,7 +763,7 @@ def annotate_mainline(commits, master_commit, runaway=1000000):
 
 
 def build_git_commits(project, update=True, include_patch=False,
-                      use_pydiff=False, skip=-1, limit=-1, verbose=False):
+                      use_pydiff=True, skip=-1, limit=-1, verbose=False):
     """Top level routine to generate commit data """
 
     repo_name = get_repo_name(project)
@@ -919,6 +919,70 @@ def find_diff_ranges(entries):
     ranges.append([start, end])     # include final entry
     return ranges
 
+#
+# Development Version
+#
+
+from language_feature import processDiffForBlame
+
+
+limit = 2
+def assign_blame2(d, path, diff_text, p_cid, repo_name,
+                  child_cid, use_pydiff=True):
+        """Combine diff with blame for a file"""
+        global limit
+        """try:"""
+        if '+++ /dev/null' in diff_text:
+            return [path, False]
+
+        print
+        print '+'*80
+        print
+        print 'Child CID:', child_cid
+        print 'Parent CID:', p_cid
+        print path
+
+        result = parse_diff(diff_text)
+
+        if use_pydiff and path.endswith('.py'):
+            # print 'parse_diff:'
+            # pprint(result)
+            # print
+            processDiffForBlame(d)
+            print
+
+        if not result:  # skip if empty
+            return [path, False]
+
+        ranges = find_diff_ranges(result)
+        # print 'ranges'
+        # pprint(ranges)
+
+        limit -= 1
+        if limit == 0:
+            assert False
+
+        # now annotate with blame information
+        blame = dict([(int(x['lineno']), x)
+                      for x in get_blame(p_cid, path, repo_name,
+                                         child_cid=child_cid,
+                                         ranges=ranges)])
+        # print 'Blame:'
+        # pprint(blame)
+        result = [dict(x.items() + [['commit', blame[x['lineno']]['commit']]])
+                  for x in result if x['lineno'] in blame]
+
+        return [path, result]
+
+        """except Exception:
+        print 'Exception'
+        assert False
+        return [path, False] """
+
+
+#
+# Stable Version
+#
 
 def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
     """Combine diff with blame for a file"""
@@ -927,8 +991,6 @@ def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
             return [path, False]
 
         result = parse_diff(diff_text)
-        # print 'parse_diff:'
-        # pprint(result)
 
         if not result:  # skip if empty
             return [path, False]
@@ -953,7 +1015,6 @@ def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
         print 'Exception'
         assert False
         return [path, False]
-
 
 #
 # Note: process_commit_details appears to be obsolete, replaced with
