@@ -282,6 +282,8 @@ def parse_diff_txt(txt, a_blob, b_blob, verbose=False, debug=False):
     dataB = getBlobData(b_blob)
     sizeB = len(dataB)
 
+    print len(dataA), len(dataB)
+
     # 1 based indexing, ignore element 0
     matchA = [None] * (sizeA + 1)
     matchB = [None] * (sizeB + 1)
@@ -354,7 +356,9 @@ def parse_diff_txt(txt, a_blob, b_blob, verbose=False, debug=False):
             lineA += 1
             lineB += 1
 
-    while curA < len(matchA):
+    if debug:
+        print 'Finally:', curA, len(matchA), curB, len(matchB)
+    while curA < len(matchA) and curB < len(matchB):
             if debug:
                 print '+ curA', curA, 'curB', curB
             matchA[curA] = curB
