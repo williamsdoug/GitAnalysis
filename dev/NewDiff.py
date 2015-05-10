@@ -364,7 +364,7 @@ def newTree(st, treeIdx, parentTree=None, start=None, end=None):
 
     if start:
         result['start'] = start
-    if end:
+    if end is not None:
         result['end'] = end
     if parentTree:
         result['idxParent'] = parentTree['idxSelf']
@@ -377,6 +377,7 @@ def buildTree(st, end, match, text):
     """Builds nested sub-trees from Python AST - top level"""
     assert isinstance(st, ast.Module)
     treeIdx = []
+    # print 'End:', end
     treetop = newTree(st, treeIdx, start=1, end=end)
     buildTree_helper(treetop, match, treeIdx, text)
     # pruneDetail(treetop, treeIdx)
@@ -415,24 +416,25 @@ def buildTree_helper(tree, match, treeIdx, text, verbose=False):
         #
         # Common back-end processing
         #
-        all_start = [x['start'] for x in subtrees] + [tree['end'] + 1]
+        if len(subtrees) > 0:
+            all_start = [x['start'] for x in subtrees] + [tree['end'] + 1]
 
-        for i, subtree in enumerate(subtrees):
-            subtree['end'] = max(all_start[i], all_start[i+1] - 1)
-            buildTree_helper(subtree, match, treeIdx, text)
+            for i, subtree in enumerate(subtrees):
+                subtree['end'] = max(all_start[i], all_start[i+1] - 1)
+                buildTree_helper(subtree, match, treeIdx, text)
 
-        tree['subtreesIdx'] = [t['idxSelf'] for t in subtrees]
+            tree['subtreesIdx'] = [t['idxSelf'] for t in subtrees]
 
-        # now compute header:
-        firstSubtreeLineno = min([t['start'] for t in subtrees])
-        tree['header_tokens'] = [match[i]
-                                 for i in range(tree['start'],
-                                                firstSubtreeLineno)
-                                 if match[i]]
-        tree['header_mismatch'] = sum([1
-                                       for i in range(tree['start'],
-                                                      firstSubtreeLineno)
-                                       if not match[i]])
+            # now compute header:
+            firstSubtreeLineno = min([t['start'] for t in subtrees])
+            tree['header_tokens'] = [match[i]
+                                     for i in range(tree['start'],
+                                                    firstSubtreeLineno)
+                                     if match[i]]
+            tree['header_mismatch'] = sum([1
+                                           for i in range(tree['start'],
+                                                          firstSubtreeLineno)
+                                           if not match[i]])
 
     if verbose:
         if type(tree['ast']) in [ast.If, ast.For, ast.With, ast.While,
@@ -444,6 +446,8 @@ def buildTree_helper(tree, match, treeIdx, text, verbose=False):
 def blankLineTrimmer(tree, text):
     """Update start and end values to eliminate blank lines"""
     # trim spaces at start
+    if 'end' not in tree:
+        return
     while (tree['end'] > tree['start']
            and text[tree['start']-1].strip() == ''):
         # print 'Stripping line', tree['end'], text[tree['end']-1]
