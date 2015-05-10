@@ -308,15 +308,18 @@ def parse_diff_txt(txt, a_blob, b_blob, verbose=False):
                 txt = match.group()
                 lineB = int(txt[1:])
 
+            # print curA, lineA, curB, lineB
+            assert (lineA - lineB) == (curA - curB)
+
             while curA < lineA:
                 matchA[curA] = curB
                 matchB[curB] = curA
                 curA += 1
                 curB += 1
             continue
-        elif line.startswith('---'):
+        elif line.startswith('--- a/'):
             continue
-        elif line.startswith('+++'):
+        elif line.startswith('+++ b/'):
             continue
         elif line.startswith('-'):
             changesA.append(lineA)
