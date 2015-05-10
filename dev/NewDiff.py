@@ -485,6 +485,34 @@ def remove_invalid_tokens(tokens, tree, idxTree):
         remove_invalid_tokens(tokens, idxTree[tree['idxParent']], idxTree)
 
 
+def cleanup_matches(tree, pairs, idxTree, otherIdxTree, tokenMap):
+    """Clean-up spurious matches (ie: other values in pairs)"""
+    print 'selected pair:', tree['pair']
+    print 'Other candidates to be ignored'
+    tokens_to_ignore = set([])
+    for p in pairs:
+        if p['idxSelf'] == tree['pair']:
+            continue
+
+        # Compute intersection to determine tokens and
+        # header-tokens spanning thisTreee and candidate
+        # and remove from ignored pair
+
+        common_tokens = set(p['tokens']).intersection(set(tree['tokens']))
+        tokens_to_ignore = tokens_to_ignore.union(common_tokens)
+        print 'ignoring:', list(common_tokens)
+
+        remove_invalid_tokens(list(common_tokens), p, otherIdxTree)
+
+    # Now remove from this Tree and it's parents
+    print 'ignoring for this tree:', list(tokens_to_ignore)
+    remove_invalid_tokens(list(tokens_to_ignore), tree, idxTree)
+
+    print 'removing from token map as well'
+    for tok in tokens_to_ignore:
+        del tokenMap[tok]
+
+
 def computePairs(tree, tokenMap, idxTree, otherIdxTree,
                  thisSide='A', verbose=False):
     pairs = []
@@ -542,6 +570,7 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree,
                             otherIdxTree[idxTree[i]['pair']]['idxParent'])
 
             # print 'Candidate parents:', candidatePairs
+            print 'Candidate pair count:', len(candidatePairs)
             if len(candidatePairs) == 1:
                 tree['pair'] = candidatePairs[0]
                 if verbose:
@@ -550,71 +579,38 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree,
                 otherIdxTree[candidatePairs[0]]['pair'] = tree['idxSelf']
 
                 if len(pairs) > 1:
-                    print 'selected pair:', tree['pair']
-                    # TO DO:  Clean-up spurious matches (ie: other values in pairs)
-                    print 'Other candidates to be ignored'
-                    tokens_to_ignore = set([])
-                    for p in pairs:
-                        if p['idxSelf'] == tree['pair']:
-                            continue
-
-                        # Compute intersection to determine tokens and
-                        # header-tokens spanning thisTreee and candidate
-                        # and remove from ignored pair
-
-                        common_tokens = set(p['tokens']).intersection(set(tree['tokens']))
-                        tokens_to_ignore = tokens_to_ignore.union(common_tokens)
-                        print 'ignoring:', list(common_tokens)
-
-                        remove_invalid_tokens(list(common_tokens), p, otherIdxTree)
-
-                    # Now remove from this Tree and it's parents
-                    print 'ignoring for this tree:', list(tokens_to_ignore)
-                    remove_invalid_tokens(list(tokens_to_ignore), tree, idxTree)
-
-                    print 'removing from token map as well'
-                    for tok in tokens_to_ignore:
-                        del tokenMap[tok]
-
+                    cleanup_matches(tree, pairs, idxTree,
+                                    otherIdxTree, tokenMap)
                 return
 
-    # if still not resolved, try using a majority vote amond candidates
-    # TO DO:  Code currently not written
     if len(pairs) > 1:
         print 'Too many pairs', len(pairs), thisSide
 
-        print
-        print '***Tree ***'
-        treeViewer(tree, idxTree)
-        print '*'*40
+        # if still not resolved, try using a majority vote among candidates
+        # with compatible parents
+        good_pairs = [p for p in pairs
+                      if 'pair' in otherIdxTree[p['idxParent']]
+                      and otherIdxTree[p['idxParent']]['pair'] ==
+                      idxTree[tree['idxParent']]['idxSelf']]
 
-        print 'This tree:', tree['idxSelf']
-        pprint(tree)
-        print
-        print 'This tree:', tree['idxSelf']
-        print 'Pairs'
-        # for pairIdx, count in pairs.items():
-        #     p = otherIdxTree[pairIdx]
+        best_pair = None
+        best_pair_count = -1
+        for p in good_pairs:
+            if len(p['tokens']) > best_pair_count:
+                best_pair = p
+                best_pair_count = len(p['tokens'])
 
-        for p in pairs:
-            print '----'
-            # print 'count:', count
-            print 'candidate:', p['idxSelf'], 'parent:', p['idxParent'],
-            print 'start:', p['start'], 'end:', p['end']
-            print 'pair', p['pair']
-            if 'header_tokens' in p:
-                print len(p['header_tokens']),
-            else:
-                print 0,
-            print len(p['tokens'])
-            print 'other tree:', p['idxSelf']
-            if type(p['ast']) in [ast.Module, ast.ClassDef, ast.FunctionDef]:
-                for z in p['ast'].decorator_list:
-                    print
-                    print ast.dump(z, include_attributes=True)
-                    print
-            pprint(p)
-        assert False
+        if best_pair:
+            tree['pair'] = best_pair['idxSelf']
+            best_pair['pair'] = tree['idxSelf']
+            if verbose:
+                print 'Pairing:', tree['idxSelf'], 'with', tree['pair'],
+                print 'via subtree matches'
+            cleanup_matches(tree, pairs, idxTree,
+                            otherIdxTree, tokenMap)
+        else:
+            print 'Unable to identify pair'
+            assert False
 
 
 def okToPair(tree1, tree2):
@@ -832,7 +828,7 @@ def performDiff(d, verbose=False):
         print '  Side B:'
     validateMismatches(treeB, idxB, idxA)
 
-    if True:
+    if verbose:
         print
         print '***Tree A ***'
         treeViewer(treeA, idxA, trim=True, idxOther=idxB)
