@@ -475,7 +475,8 @@ def remove_invalid_tokens(tokens, tree, idxTree):
 
     before = len(tree['tokens'])
     for tok in tokens:
-        tree['tokens'].remove(tok)
+        if tok in tree['tokens']:
+            tree['tokens'].remove(tok)
     tree['mismatch'] += before - len(tree['tokens'])
 
     if 'header_tokens' in tree:
