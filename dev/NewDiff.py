@@ -3,11 +3,14 @@
 #
 # Author:  Doug Williams - Copyright 2015
 #
-# Last updated 5/8/2015
+# Last updated 5/11/2015
 #
 # History:
-# - 5/5/15 - Initial version of file
-# - 5/8/15 - Continued active development
+# - 5/5/15  - Initial version of file
+# - 5/8/15  - Continued active development
+# - 5/10/15 - Various bug fixes while testing against nova, glance,
+#             swift, heat, cinder
+# - 5/11/15 - Add support for generation of blame mask.
 #
 #
 # Top Level Routines:
@@ -145,6 +148,83 @@ def old_compare_ast(node1, node2, debug=True):
                                      itertools.izip(node1, node2)))
     else:
         return node1 == node2
+
+
+def reduceRanges(ranges, verbose=False):
+    """Combined overlapping of adjacent ranges"""
+    if len(ranges) < 2:
+        return ranges
+    if verbose:
+        print 'Before:', ranges
+
+    ranges = sorted(ranges, key=lambda x: x[0])
+    result = [ranges[0]]
+    for r in ranges[1:]:
+        if r[0] <= result[-1][1] + 1:
+            result[-1][1] = r[1]
+        else:
+            result.append(r)
+    if verbose:
+        print 'After:', result
+    return result
+
+
+def tokenGetLineno(tok, side='A'):
+    """Extracts line number of match token"""
+    vals = tok.split('_')
+    if len(vals) <= 1:
+        return -1
+    if side == 'A':
+        return int(vals[0][1:])  # strip off A before lineno
+    else:
+        return int(vals[1][1:])  # strip off B before lineno
+
+
+def generateRanges(tree, idxTree, side='A', depth=0, verbose=False):
+    """Returns list of ranges for use with get_blame"""
+    ranges = []
+    if tree['mismatch'] == 0:
+        return ranges
+
+    if 'header_mismatch' in tree and tree['header_mismatch'] > 0:
+        headerRange = [tree['start'], tree['end']]
+        if 'subtreesIdx' in tree and len(tree['subtreesIdx']) > 0:
+            start = min([idxTree[i]['start'] for i in tree['subtreesIdx']])
+            headerRange[1] = max(tree['start'], start - 1)
+            if verbose:
+                print 'setting header range to:', headerRange,
+                print depth, tree['start'], tree['end']
+        ranges.append(headerRange)
+
+    if 'subtreesIdx' in tree:
+        if verbose:
+            print 'processing subtrees', depth
+        for i in tree['subtreesIdx']:
+            if idxTree[i]['mismatch'] > 0:
+                if verbose:
+                    print 'processing subtree entry'
+                ranges = ranges + generateRanges(idxTree[i], idxTree,
+                                                 depth=depth+1)
+            else:
+                if verbose:
+                    print 'subtree match', idxTree[i]['end'],
+                    print idxTree[i]['end']
+    else:
+        ranges.append([tree['start'], tree['end']])
+
+    # remove any other matches from range
+    for tok in tree['tokens']:
+        val = tokenGetLineno(tok, side=side)
+        if val in ranges:
+            print 'deleting:', val
+            assert False
+            ranges.remove(val)
+
+    if depth == 0:
+        # Combined adjacent entries into range
+        return reduceRanges(ranges)
+    else:
+        return ranges
 
 
 def treeViewer(tree, idxTree, depth=0, indent=4, trim=False,
@@ -724,7 +804,42 @@ def pruneDetail(tree, idxTree):
                 pruneDetail(idxTree[i], idxTree)
 
 
-def ignoreDocstrings(tree, idxTree, verbose=False):
+def ignoreDocstrings(idxTree, lines, verbose=False, parserFix=True):
+    """Ignore any mismatch in doc_strings"""
+    for tree in idxTree:
+        if not (isinstance(tree['ast'], ast.Module)
+                or isinstance(tree['ast'], ast.ClassDef)
+                or isinstance(tree['ast'], ast.FunctionDef)):
+            continue
+        if 'subtreesIdx' in tree:
+            firstLine = idxTree[tree['subtreesIdx'][0]]
+            if (isinstance(firstLine['ast'], ast.Expr)
+                    and isinstance(firstLine['ast'].value, ast.Str)):
+                if parserFix:
+                    # There is a the python ast parser where
+                    # it incorrectly notes the start of docstrings.
+                    # the below code compensates for this bug.  WHen
+                    # upgrading to Python3, need verify whether will needed
+                    quotes = lines[firstLine['start']-1].count("'''")
+                    double_quotes = lines[firstLine['start']-1].count('"""')
+                    if max(quotes, double_quotes) == 1:
+                        if double_quotes == 1:
+                            target = '"""'
+                        else:
+                            target = "'''"
+                        for i in range(firstLine['start']-1,
+                                       tree['start'], -1):
+                            if lines[i-1].count(target) == 1:
+                                firstLine['start'] = i
+                                break
+                if verbose:
+                    print '    ignoring docstring', tree['idxSelf'],
+                    print firstLine['idxSelf']
+                tree['mismatch'] -= firstLine['mismatch']
+                firstLine['mismatch'] = 0
+
+
+def oldIgnoreDocstrings(tree, idxTree, verbose=True):
     """Ignore any mismatch in doc_strings"""
     if ('subtreesIdx' in tree
         and (isinstance(tree['ast'], ast.Module)
@@ -808,7 +923,7 @@ def performDiff(d, verbose=False):
         print
         print 'ERROR: Syntax Error while processing: ', d.a_blob.path
         print
-        return False
+        return False, False, False, False
 
     treeA, idxA = buildTree(st_a, len(matchA) - 1, matchA,
                             getBlobData(d.a_blob))
@@ -817,7 +932,7 @@ def performDiff(d, verbose=False):
         st_b = get_st_from_blob(d.b_blob)
     except SyntaxError:
         print 'Syntax Error while processing: ', d.a_blob.path
-        return False
+        return False, False, False, False
 
     treeB, idxB = buildTree(st_b, len(matchB) - 1, matchB,
                             getBlobData(d.b_blob))
@@ -854,8 +969,8 @@ def performDiff(d, verbose=False):
     if verbose:
         print
         print 'Ignore Docstrings:'
-    ignoreDocstrings(treeA, idxA)
-    ignoreDocstrings(treeB, idxB)
+    ignoreDocstrings(idxA, getBlobData(d.a_blob))
+    ignoreDocstrings(idxB, getBlobData(d.b_blob))
 
     # pruneDetail(treeA, idxA)
     # pruneDetail(treeB, idxB)
@@ -895,3 +1010,5 @@ def performDiff(d, verbose=False):
         print
         print '***Tree B ***'
         treeViewer(treeB, idxB, trim=False)
+
+    return treeA, treeB, idxA, idxB
