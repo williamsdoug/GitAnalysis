@@ -564,6 +564,11 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree,
 
     for tok in tokens:
         if not tok.startswith('blank'):
+            if (thisSide not in tokenMap[tok]
+                    or otherSide not in tokenMap[tok]):
+                print 'Skipping empty token', tok
+                continue
+
             this = tokenMap[tok][thisSide]
             match = tokenMap[tok][otherSide]
             if this == tree and match not in pairs:
