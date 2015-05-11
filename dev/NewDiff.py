@@ -282,7 +282,8 @@ def parse_diff_txt(txt, a_blob, b_blob, verbose=False, debug=False):
     dataB = getBlobData(b_blob)
     sizeB = len(dataB)
 
-    print len(dataA), len(dataB)
+    if debug:
+        print len(dataA), len(dataB)
 
     # 1 based indexing, ignore element 0
     matchA = [None] * (sizeA + 1)
@@ -796,11 +797,23 @@ def performDiff(d, verbose=False):
 
     matchA, matchB = parse_diff_txt(d.diff, d.a_blob, d.b_blob)
 
-    st_a = get_st_from_blob(d.a_blob)
+    try:
+        st_a = get_st_from_blob(d.a_blob)
+    except SyntaxError:
+        print
+        print 'ERROR: Syntax Error while processing: ', d.a_blob.path
+        print
+        return False
+
     treeA, idxA = buildTree(st_a, len(matchA) - 1, matchA,
                             getBlobData(d.a_blob))
 
-    st_b = get_st_from_blob(d.b_blob)
+    try:
+        st_b = get_st_from_blob(d.b_blob)
+    except SyntaxError:
+        print 'Syntax Error while processing: ', d.a_blob.path
+        return False
+
     treeB, idxB = buildTree(st_b, len(matchB) - 1, matchB,
                             getBlobData(d.b_blob))
 
