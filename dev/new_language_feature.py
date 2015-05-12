@@ -78,6 +78,20 @@ def isModuleOrClass(st):
             )
 
 
+def ASTwrapper(st):
+    if isinstance(st, ast.ClassDef) or isinstance(st, ast.FunctionDef):
+        return st
+    result = ast.FunctionDef(name='***dummy***',
+                             body=[st])
+    try:
+        result.lineno = st.lineno
+        result.col_offset = st.col_offset
+    except Exception:
+        result.lineno = 1
+        result.col_offset = 1
+    return result
+
+
 def get_cc(st):
     """Wraps CC, inserting dummy function if needed"""
 
@@ -183,7 +197,7 @@ DECISION_OPS = ['If', 'For', 'While', 'With', 'ExceptHandler',
                 'GeneratorExp', 'DictComp']
 
 
-def computeChanges(tree, idxTree):
+def computeChanges(tree, idxTree, depth=0, verbose=False):
     """Computes node changes and cyclomatic complex for a set of ast edits"""
     changes = 0
     complexity = 0
@@ -192,18 +206,17 @@ def computeChanges(tree, idxTree):
 
     if tree['mismatch'] == 0:
         return changes, complexity, new_functions, new_classes
-    print 'Calling computeChanges:'
-    pprint(tree)
+    if verbose and depth == 0:
+        print 'Calling computeChanges:'
+        pprint(tree)
+        treeViewer(tree, idxTree, trim=True)
+        print
 
-    if tree['pair']:
+    if 'pair' in tree:
         if 'header_mismatch' in tree and tree['header_mismatch'] > 0:
             changes += 1
-
             node_type = type(tree['ast']).__name__.split('.')[-1]
             if node_type in DECISION_OPS:
-                print 'Found Decision Ops'
-                print 'temporarily stopping so result can be validated'
-                assert False
                 complexity += 1
 
         # if 'subtrees' in tree:
@@ -211,24 +224,26 @@ def computeChanges(tree, idxTree):
         if 'subtreesIdx' in tree:
             for i in tree['subtreesIdx']:
                 subtree = idxTree[i]
-                (this_change, this_cc,
-                 this_functions, this_classes) = computeChanges(subtree,
-                                                                idxTree)
-                changes += this_change
-                complexity += this_cc
-                new_functions += this_functions
-                new_classes += this_classes
+                if subtree['mismatch'] > 0:
+                    (this_change, this_cc, this_functions, this_classes) = \
+                        computeChanges(subtree, idxTree, depth=depth+1)
+                    if verbose:
+                        print depth, 'Subtree', i, 'returns:', this_change,
+                        print this_cc, this_functions, this_classes
+                    changes += this_change
+                    complexity += this_cc
+                    new_functions += this_functions
+                    new_classes += this_classes
     else:
         changes += get_total_nodes(tree['ast'])
         complexity += get_cc(tree['ast'])
 
         if (isinstance(tree['ast'], ast.FunctionDef)
             or isinstance(tree['ast'], ast.FunctionDef)
-            or isinstance(tree['ast'], ast.Module)
-            ):
-                stats = get_stats(tree['ast'])
-                new_functions += stats['total_functions']
-                new_classes += stats['total_classes']
+                or isinstance(tree['ast'], ast.Module)):
+            stats = get_stats(tree['ast'])
+            new_functions += stats['total_functions']
+            new_classes += stats['total_classes']
 
     return changes, complexity, new_functions, new_classes
 
@@ -247,9 +262,8 @@ def process_commit_add(d, verbose=False):
             'new_classes': stats['total_classes']}
 
 
-def processDiff(d, verbose=True):
+def processDiff(d, verbose=False):
     """Process individual diff pair """
-    verbose=True
     treeA, treeB, idxA, idxB = performDiff(d)
 
     total_changes = 0
@@ -260,27 +274,31 @@ def processDiff(d, verbose=True):
     assert isinstance(treeA['ast'], ast.Module)
     assert isinstance(treeB['ast'], ast.Module)
 
-    print 'printing tree A'
-    treeViewer(treeA, idxA, trim=False, idxOther=idxB)
-    print
+    if verbose:
+        print 'printing tree A'
+        treeViewer(treeA, idxA, trim=False, idxOther=idxB)
+        print
 
-    print 'printing tree B'
-    treeViewer(treeB, idxB, trim=False, idxOther=idxA)
-    print
+        print 'printing tree B'
+        treeViewer(treeB, idxB, trim=False, idxOther=idxA)
+        print
 
     assert 'subtreesIdx' in treeA
-
-    print 'TO DO:  Determine correct tree for below analysis'
 
     for i in treeA['subtreesIdx']:
         tree = idxA[i]
         if tree['mismatch'] == 0:
-            print 'Skipping sub-tree', i
+            if verbose:
+                print 'Skipping sub-tree', i
             continue
-        print 'printing subtree'
-        treeViewer(tree, idxA, trim=True, idxOther=idxB)
+        if verbose:
+            print 'printing subtree'
+            treeViewer(tree, idxA, trim=True, idxOther=idxB)
 
         changes, cc, new_functions, new_classes = computeChanges(tree, idxA)
+        if verbose:
+            print 'compute changes returned', changes, cc,
+            print new_functions, new_classes
         total_changes += changes
         total_complexity += cc
         total_new_functions += new_functions
@@ -293,9 +311,6 @@ def processDiff(d, verbose=True):
         print 'New functions', total_new_functions
         print 'New classes', total_new_classes
         print
-
-    print 'TO DO:  NEED TO UPGRADE CODE'
-    assert False
 
     return {'name': d.b_blob.path,
             'changes': total_changes,
@@ -367,7 +382,7 @@ def process_commit_diff(c, filter_config, verbose=False):
             elif (isValidBlob(d.a_blob) and isValidBlob(d.b_blob)
                   and d.b_blob.path.endswith('.py')):
                     try:
-                        result = processDiff(d, verbose=verbose)
+                        result = processDiff(d)  # , verbose=verbose)
                         # print '*',
                         # sys.stdout.flush()
                         if result['changes'] > 0:
