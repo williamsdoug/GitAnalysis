@@ -3,7 +3,7 @@
 #
 # Author:  Doug Williams - Copyright 2015
 #
-# Last updated 5/11/2015
+# Last updated 5/12/2015
 #
 # History:
 # - 5/5/15  - Initial version of file
@@ -11,6 +11,7 @@
 # - 5/10/15 - Various bug fixes while testing against nova, glance,
 #             swift, heat, cinder
 # - 5/11/15 - Add support for generation of blame mask.
+# - 5/12/15 - Fix handling of TryExcept
 #
 #
 # Top Level Routines:
@@ -502,6 +503,7 @@ def buildTree_helper(tree, match, treeIdx, text, verbose=False):
 
     if type(tree['ast']) in [ast.Module, ast.ClassDef, ast.FunctionDef,
                              ast.If, ast.For, ast.While, ast.With,
+                             ast.TryExcept, ast.TryFinally,
                              ast.ExceptHandler]:
         # body
         subtrees = [newTree(st, treeIdx, parentTree=tree, start=st.lineno)
@@ -839,24 +841,84 @@ def ignoreDocstrings(idxTree, lines, verbose=False, parserFix=True):
                 firstLine['mismatch'] = 0
 
 
-def oldIgnoreDocstrings(tree, idxTree, verbose=True):
-    """Ignore any mismatch in doc_strings"""
-    if ('subtreesIdx' in tree
-        and (isinstance(tree['ast'], ast.Module)
-             or isinstance(tree['ast'], ast.ClassDef)
-             or isinstance(tree['ast'], ast.FunctionDef))):
-        firstLine = idxTree[tree['subtreesIdx'][0]]
-        if (firstLine['mismatch'] > 0
-                and isinstance(firstLine['ast'], ast.Expr)
-                and isinstance(firstLine['ast'].value, ast.Str)):
-            if verbose:
-                print '    ignoring docstring', tree['idxSelf'],
-                print firstLine['idxSelf']
-            tree['mismatch'] -= firstLine['mismatch']
-            firstLine['mismatch'] = 0
-    if 'subtreesIdx' in tree:
+def matchTryExcept(idxTree, otherIdxTree, verbose=False):
+    """Special case here existing code encapsulated in Try/Except clause"""
+
+    for tree in idxTree:
+        if not (isinstance(tree['ast'], ast.TryExcept)
+                and tree['mismatch'] > 0
+                and 'pair' in idxTree[tree['idxParent']]):
+            continue
+        if verbose:
+            print
+            print 'Found instance of TryExcept'
+            treeViewer(tree, idxTree, trim=False, idxOther=otherIdxTree)
+            print
+            print 'Other Parent'
+        otherParent = otherIdxTree[idxTree[tree['idxParent']]['pair']]
+        if verbose:
+            treeViewer(otherParent, otherIdxTree, trim=False, idxOther=idxTree)
+            print '-'*40
+
+        origThisMismatch = tree['mismatch']
+        origOtherMismatch = otherParent['mismatch']
+        total_matches = 0
+
         for i in tree['subtreesIdx']:
-            ignoreDocstrings(idxTree[i], idxTree)
+            thisTree = idxTree[i]
+            for j in otherParent['subtreesIdx']:
+                candidateTree = otherIdxTree[j]
+                if compare_ast(thisTree['ast'], candidateTree['ast']):
+                    if verbose:
+                        print
+                        print 'Matched',
+                        treeViewer(thisTree, idxTree, trim=False)
+                        print ast.dump(thisTree['ast'],
+                                       include_attributes=False)
+                        print 'with',
+                        treeViewer(candidateTree, otherIdxTree, trim=False)
+                        print ast.dump(candidateTree['ast'],
+                                       include_attributes=False)
+
+                    thisTree['pair'] = candidateTree['idxSelf']
+                    candidateTree['pair'] = thisTree['idxSelf']
+                    tree['mismatch'] -= thisTree['mismatch']
+                    otherParent['mismatch'] -= candidateTree['mismatch']
+                    thisTree['mismatch'] = 0
+                    candidateTree['mismatch'] = 0
+                    total_matches += 1
+                    break
+
+        thisDelta = origThisMismatch - tree['mismatch']
+        otherDelta = origOtherMismatch - otherParent['mismatch']
+
+        # Update mismatch count in hierarchy
+        curIdx = tree['idxParent']
+        while curIdx != -1:
+            t = idxTree[curIdx]
+            t['mismatch'] -= thisDelta
+            curIdx = t['idxParent']
+
+        curIdx = otherParent['idxParent']
+        while curIdx != -1:
+            t = otherIdxTree[curIdx]
+            t['mismatch'] -= otherDelta
+            curIdx = t['idxParent']
+
+        if verbose:
+            print
+            print 'Total matches', total_matches
+            print 'Delta mismatch counts:',
+            print 'tree:', thisDelta, 'otherParent', otherDelta
+            print
+
+            print 'Updated TryExcept'
+            treeViewer(tree, idxTree, trim=False, idxOther=otherIdxTree)
+            print
+            print 'Updated Other Parent'
+            treeViewer(otherParent, otherIdxTree, trim=False, idxOther=idxTree)
+            print
+    return
 
 
 def validateMismatches(tree, thisIdx, otherIdx, verbose=False):
@@ -962,6 +1024,12 @@ def performDiff(d, verbose=False):
 
     if verbose:
         print
+        print 'Process TryExcept:'
+    matchTryExcept(idxA, idxB)
+    matchTryExcept(idxB, idxA)
+
+    if verbose:
+        print
         print 'Infer additional pairings:'
     for tree in idxA:
         inferPairs(tree, idxA, idxB)
@@ -1012,3 +1080,19 @@ def performDiff(d, verbose=False):
         treeViewer(treeB, idxB, trim=False)
 
     return treeA, treeB, idxA, idxB
+
+
+def getRangesForBlame(d, verbose=False):
+    """Compute rnage information for use with get_blame()"""
+    treeA, treeB, idxA, idxB = performDiff(d)
+    if treeB and treeB['mismatch'] > 0:
+        if verbose:
+            # treeViewer(treeB, idxB, trim=False)
+            # print '-'*40
+            treeViewer(treeB, idxB, trim=True)
+        ranges = generateRanges(treeB, idxB, side='B')
+        if verbose:
+            print 'treeB:', ranges
+        return ranges
+    else:
+        return []
