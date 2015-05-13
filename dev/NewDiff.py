@@ -603,11 +603,13 @@ def remove_invalid_tokens(tokens, tree, idxTree):
         remove_invalid_tokens(tokens, idxTree[tree['idxParent']], idxTree)
 
 
-def cleanup_matches(tree, pairs, idxTree, otherIdxTree, tokenMap):
+def cleanup_matches(tree, pairs, idxTree, otherIdxTree,
+                    tokenMap, verbose=False):
     """Clean-up spurious matches (ie: other values in pairs)"""
-    if 'pair' in tree:
-        print 'selected pair:', tree['pair']
-    print 'Other candidates to be ignored'
+    if verbose:
+        if 'pair' in tree:
+            print 'selected pair:', tree['pair']
+        print 'Other candidates to be ignored'
     tokens_to_ignore = set([])
     for p in pairs:
         if 'pair' in tree and p['idxSelf'] == tree['pair']:
@@ -619,15 +621,18 @@ def cleanup_matches(tree, pairs, idxTree, otherIdxTree, tokenMap):
 
         common_tokens = set(p['tokens']).intersection(set(tree['tokens']))
         tokens_to_ignore = tokens_to_ignore.union(common_tokens)
-        print 'ignoring:', list(common_tokens)
+        if verbose:
+            print 'ignoring:', list(common_tokens)
 
         remove_invalid_tokens(list(common_tokens), p, otherIdxTree)
 
     # Now remove from this Tree and it's parents
-    print 'ignoring for this tree:', list(tokens_to_ignore)
+    if verbose:
+        print 'ignoring for this tree:', list(tokens_to_ignore)
     remove_invalid_tokens(list(tokens_to_ignore), tree, idxTree)
 
-    print 'removing from token map as well'
+    if verbose:
+        print 'removing from token map as well'
     for tok in tokens_to_ignore:
         del tokenMap[tok]
 

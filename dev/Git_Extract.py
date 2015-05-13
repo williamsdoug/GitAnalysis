@@ -929,34 +929,35 @@ def find_diff_ranges(entries):
 #
 
 
-limit = 2
+limit = -1000  # Limit ignored if negative value
+
+
 def assign_blame2(d, path, diff_text, p_cid, repo_name,
-                  child_cid, use_pydiff=True, ignore_errors=True):
+                  child_cid, use_pydiff=True, verbose=False):
         """Combine diff with blame for a file"""
         global limit
         """try:"""
         if '+++ /dev/null' in diff_text:
             return [path, False]
 
-        print
-        print '+'*80
-        print
-        print 'Child CID:', child_cid
-        print 'Parent CID:', p_cid
-        print path
+        # print
+        # print '+'*80
+        if verbose:
+            print
+            print 'Child CID:', child_cid
+            print 'Parent CID:', p_cid
+            print path
 
         if use_pydiff and path.endswith('.py'):
             # ranges = processDiffForBlame(d)
             try:
                 ranges = getRangesForBlame(d)
             except ParserError:
+                print
                 print 'error during blame extraction, commit should be ignored'
+                print
                 # TO DO:  Insert error handling here
-                if ignore_errors:
-                    return [path, False]
-                else:
-                    assert False
-            print
+                return [path, -1]
         else:  # Code path for non-python files
             result = parse_diff(diff_text)
 
@@ -965,8 +966,8 @@ def assign_blame2(d, path, diff_text, p_cid, repo_name,
 
             ranges = find_diff_ranges(result)
 
-        print 'ranges',
-        pprint(ranges)
+        # print 'ranges',
+        # pprint(ranges)
 
         limit -= 1
         if limit == 0:
@@ -977,15 +978,15 @@ def assign_blame2(d, path, diff_text, p_cid, repo_name,
                       for x in get_blame(p_cid, path, repo_name,
                                          child_cid=child_cid,
                                          ranges=ranges)])
-        print 'Blame:'
-        pprint(blame)
+        # print 'Blame:'
+        # pprint(blame)
         if use_pydiff and path.endswith('.py'):
             lines = getLinesFromRanges(ranges)
             result = [{'proximity': 1, 'lineno': x,
                        'commit': blame[x]['commit']}
                       for x in lines if x in blame]
-            print 'Result:'
-            pprint(result)
+            # print 'Result:'
+            # pprint(result)
         else:
             result = [dict(x.items() + [['commit',
                                         blame[x['lineno']]['commit']]])

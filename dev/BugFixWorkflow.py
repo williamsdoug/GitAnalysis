@@ -636,15 +636,18 @@ def compute_all_blame(project, guilt_data, combined_commits,
                 diff_text = d[0].diff
                 # print diff_text
                 # fname, blame_data = assign_blame(pair['b_path'], diff_text,
-                fname, blame_data = assign_blame2(d[0], pair['b_path'], diff_text,
-                                                 be['blame_commit'],
-                                                 repo_name,
-                                                 be['diff_commit'])
+                fname, blame_data = assign_blame2(d[0], pair['b_path'],
+                                                  diff_text,
+                                                  be['blame_commit'],
+                                                  repo_name,
+                                                  be['diff_commit'])
                 commit_blame[fname] = blame_data
 
             blame_cache[bc_key] = commit_blame    # Now populate cache
 
         be['blame'] = blame_cache[bc_key]
+        if blame_cache[bc_key] == -1:
+            print 'Found error value'
 
         # pprint(be)
         # print be['diff_commit'], be['blame'].keys()
