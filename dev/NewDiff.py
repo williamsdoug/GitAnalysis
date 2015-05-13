@@ -1081,7 +1081,7 @@ def performDiff(d, verbose=False):
 
 
 def getRangesForBlame(d, verbose=False):
-    """Compute rnage information for use with get_blame()"""
+    """Compute range information for use with get_blame()"""
     treeA, treeB, idxA, idxB = performDiff(d)
     if treeB and treeB['mismatch'] > 0:
         if verbose:

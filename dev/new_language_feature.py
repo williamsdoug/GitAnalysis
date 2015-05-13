@@ -76,13 +76,6 @@ def get_st_from_blob(blob, verbose=False):
     return st, txt.split('\n')
 
 
-def isModuleOrClass(st):
-    return (isinstance(st, ast.Module)
-            or isinstance(st, ast.ClassDef)
-            # or isinstance(st, ast.FunctionDef)
-            )
-
-
 def ASTwrapper(st):
     if isinstance(st, ast.ClassDef) or isinstance(st, ast.FunctionDef):
         return st
@@ -294,27 +287,26 @@ def processDiff(d, verbose=False):
         treeViewer(treeB, idxB, trim=False, idxOther=idxA)
         print
 
-    assert 'subtreesIdx' in treeA
-
-    for i in treeA['subtreesIdx']:
-        tree = idxA[i]
-        if tree['mismatch'] == 0:
+    if 'subtreesIdx' in treeA:
+        for i in treeA['subtreesIdx']:
+            tree = idxA[i]
+            if tree['mismatch'] == 0:
+                if verbose:
+                    print 'Skipping sub-tree', i
+                continue
             if verbose:
-                print 'Skipping sub-tree', i
-            continue
-        if verbose:
-            print 'printing subtree'
-            treeViewer(tree, idxA, trim=True, idxOther=idxB)
+                print 'printing subtree'
+                treeViewer(tree, idxA, trim=True, idxOther=idxB)
 
-        changes, cc, new_functions, new_classes = computeChanges(tree, idxA)
-        if verbose:
-            print 'compute changes returned', changes, cc,
-            print new_functions, new_classes
-        total_changes += changes
-        total_complexity += cc
-        total_new_functions += new_functions
-        total_new_classes += new_classes
-        # print 'Changes:', changes, 'CC:', cc
+            changes, cc, new_functions, new_classes = computeChanges(tree, idxA)
+            if verbose:
+                print 'compute changes returned', changes, cc,
+                print new_functions, new_classes
+            total_changes += changes
+            total_complexity += cc
+            total_new_functions += new_functions
+            total_new_classes += new_classes
+            # print 'Changes:', changes, 'CC:', cc
 
     if verbose:
         print 'Change nodes:', total_changes
@@ -421,15 +413,6 @@ def process_commit_diff_helper(c, filter_config, verbose=False):
             pprint(ret)
             print
     return ret
-
-
-def getLineno(tree):
-    """get starting lineno from tree or subtree"""
-    if (isinstance(tree['ast'], ast.expr)
-            or isinstance(tree['ast'], ast.stmt)):
-        return tree['ast'].lineno
-    else:
-        return None
 
 
 def processDiffForBlame(d, verbose=False):
