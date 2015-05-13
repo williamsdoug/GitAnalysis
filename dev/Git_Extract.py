@@ -6,7 +6,7 @@
 #
 # Currently being tested using OpenStack (Nova, Swift, Glance, Cinder, Heat)
 #
-# Last updated 4/26/2015
+# Last updated 5/13/2015
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -106,6 +106,7 @@
 # - 4/23/15 - Fix change file identification in process_commit_files_unfiltered
 # - 4/26/15 - Integrate PyDiff and and process_commit_diff feature extraction
 #             from language_feature
+# - 5/13/15 - Integrate with NewDiff (successor to PyDiff)
 #
 #
 # Top Level Routines:
@@ -143,7 +144,9 @@ from multiprocessing import Pool
 from git_analysis_config import get_filter_config
 from git_analysis_config import get_repo_name, get_corpus_dir
 
-from language_feature import process_commit_diff
+from new_language_feature import process_commit_diff
+
+from NewDiff import getRangesForBlame, ParserError, getLinesFromRanges
 
 
 #
@@ -902,6 +905,8 @@ def get_blame(cid, path, repo_name,
         return False
     return result
 
+# Note: find_diff_ranges() only used for non-python files
+
 
 def find_diff_ranges(entries):
     """Extracts range of relevant line numbers from parse_diff result"""
@@ -923,12 +928,10 @@ def find_diff_ranges(entries):
 # Development Version
 #
 
-from language_feature import processDiffForBlame
-
 
 limit = 2
 def assign_blame2(d, path, diff_text, p_cid, repo_name,
-                  child_cid, use_pydiff=True):
+                  child_cid, use_pydiff=True, ignore_errors=True):
         """Combine diff with blame for a file"""
         global limit
         """try:"""
@@ -942,21 +945,28 @@ def assign_blame2(d, path, diff_text, p_cid, repo_name,
         print 'Parent CID:', p_cid
         print path
 
-        result = parse_diff(diff_text)
-
         if use_pydiff and path.endswith('.py'):
-            # print 'parse_diff:'
-            # pprint(result)
-            # print
-            processDiffForBlame(d)
+            # ranges = processDiffForBlame(d)
+            try:
+                ranges = getRangesForBlame(d)
+            except ParserError:
+                print 'error during blame extraction, commit should be ignored'
+                # TO DO:  Insert error handling here
+                if ignore_errors:
+                    return [path, False]
+                else:
+                    assert False
             print
+        else:  # Code path for non-python files
+            result = parse_diff(diff_text)
 
-        if not result:  # skip if empty
-            return [path, False]
+            if not result:  # skip if empty
+                return [path, False]
 
-        ranges = find_diff_ranges(result)
-        # print 'ranges'
-        # pprint(ranges)
+            ranges = find_diff_ranges(result)
+
+        print 'ranges',
+        pprint(ranges)
 
         limit -= 1
         if limit == 0:
@@ -967,10 +977,19 @@ def assign_blame2(d, path, diff_text, p_cid, repo_name,
                       for x in get_blame(p_cid, path, repo_name,
                                          child_cid=child_cid,
                                          ranges=ranges)])
-        # print 'Blame:'
-        # pprint(blame)
-        result = [dict(x.items() + [['commit', blame[x['lineno']]['commit']]])
-                  for x in result if x['lineno'] in blame]
+        print 'Blame:'
+        pprint(blame)
+        if use_pydiff and path.endswith('.py'):
+            lines = getLinesFromRanges(ranges)
+            result = [{'proximity': 1, 'lineno': x,
+                       'commit': blame[x]['commit']}
+                      for x in lines if x in blame]
+            print 'Result:'
+            pprint(result)
+        else:
+            result = [dict(x.items() + [['commit',
+                                        blame[x['lineno']]['commit']]])
+                      for x in result if x['lineno'] in blame]
 
         return [path, result]
 

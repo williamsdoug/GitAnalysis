@@ -3,7 +3,7 @@
 #
 # Author:  Doug Williams - Copyright 2015
 #
-# Last updated 5/12/2015
+# Last updated 5/13/2015
 #
 # History:
 # - 5/5/15  - Initial version of file
@@ -12,6 +12,7 @@
 #             swift, heat, cinder
 # - 5/11/15 - Add support for generation of blame mask.
 # - 5/12/15 - Fix handling of TryExcept
+# - 5/13/15 - Integration with end-to-end blame processing
 #
 #
 # Top Level Routines:
@@ -186,8 +187,8 @@ def tokenGetLineno(tok, side='A'):
         return int(vals[1][1:])  # strip off B before lineno
 
 
-def generateRanges(tree, idxTree, side='A', depth=0, verbose=False):
-    """Returns list of ranges for use with get_blame"""
+def generateRangesForBlame(tree, idxTree, side='A', depth=0, verbose=False):
+    """Returns list of line ranges for use with get_blame"""
     ranges = []
     if tree['mismatch'] == 0:
         return ranges
@@ -209,8 +210,8 @@ def generateRanges(tree, idxTree, side='A', depth=0, verbose=False):
             if idxTree[i]['mismatch'] > 0:
                 if verbose:
                     print 'processing subtree entry'
-                ranges = ranges + generateRanges(idxTree[i], idxTree,
-                                                 depth=depth+1)
+                ranges = ranges + generateRangesForBlame(idxTree[i], idxTree,
+                                                         depth=depth+1)
             else:
                 if verbose:
                     print 'subtree match', idxTree[i]['end'],
@@ -225,12 +226,7 @@ def generateRanges(tree, idxTree, side='A', depth=0, verbose=False):
             print 'deleting:', val
             assert False
             ranges.remove(val)
-
-    if depth == 0:
-        # Combined adjacent entries into range
-        return reduceRanges(ranges)
-    else:
-        return ranges
+    return ranges
 
 
 def treeViewer(tree, idxTree, depth=0, indent=4, trim=False,
@@ -1080,6 +1076,14 @@ def performDiff(d, verbose=False):
     return treeA, treeB, idxA, idxB
 
 
+def getLinesFromRanges(ranges):
+    """Converts ranges to list of line numbners"""
+    result = []
+    for r in ranges:
+        result += range(r[0], r[1] + 1)
+    return result
+
+
 def getRangesForBlame(d, verbose=False):
     """Compute range information for use with get_blame()"""
     treeA, treeB, idxA, idxB = performDiff(d)
@@ -1088,7 +1092,9 @@ def getRangesForBlame(d, verbose=False):
             # treeViewer(treeB, idxB, trim=False)
             # print '-'*40
             treeViewer(treeB, idxB, trim=True)
-        ranges = generateRanges(treeB, idxB, side='B')
+        lines = generateRangesForBlame(treeB, idxB, side='B')
+        # Combined adjacent entries into range
+        ranges = reduceRanges(lines)
         if verbose:
             print 'treeB:', ranges
         return ranges

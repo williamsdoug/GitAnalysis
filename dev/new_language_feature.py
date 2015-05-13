@@ -415,13 +415,6 @@ def process_commit_diff_helper(c, filter_config, verbose=False):
     return ret
 
 
-def processDiffForBlame(d, verbose=False):
-    try:
-        return getRangesForBlame(d, verbose=verbose)
-    except ParserError:
-        return -1
-
-
 # Debug code, should be deleted once no longer needed
 #
 

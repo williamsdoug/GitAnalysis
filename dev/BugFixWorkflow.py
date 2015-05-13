@@ -7,7 +7,7 @@
 #
 # Currently being tested using OpenStack (Nova, Swift, Glance, Cinder, Heat)
 #
-# Last updated 3/3/2015
+# Last updated 5/13/2015
 #
 # ###Issues:
 # - Use of global variable ALL_BUG is a hack, needs to be cleaned up
@@ -34,6 +34,8 @@
 # = 3/10/15: Added export_feature_vectors_to_csv()
 # - 3/18/15: Added weight_importance_policy (wip) to annotate guilt. Previously
 #            handled upstream in get_bug_fix_weight
+# - 5/13/15:  Integrate with NewDiff and new_language_feature.  (changes mostly
+#             in Git_Extract)
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -56,9 +58,11 @@ from commit_analysis import fit_features, extract_features
 from commit_analysis import blame_compute_normalized_guilt
 from commit_analysis import autoset_threshold
 
-from Git_Extract import assign_blame, get_blame
+# from Git_Extract import assign_blame
+from Git_Extract import assign_blame2, get_blame
 from Git_Extract import project_to_fname
-from Git_Extract import process_commit_files_unfiltered, filter_file
+# from Git_Extract import process_commit_files_unfiltered
+from Git_Extract import filter_file
 from Git_Extract import get_commit_diff_blob_paths
 from Git_Extract import extract_master_commit
 from Git_Extract import get_all_files_from_commit
@@ -68,6 +72,7 @@ from Git_Extract import get_commit_ordering_min_max
 from Git_Extract import find_legacy_cutoff
 from Git_Extract import annotate_commit_loc
 from Git_Extract import get_corpus_dir
+
 
 from jp_load_dump import jload, jdump
 from jp_load_dump import pload, pdump
@@ -577,11 +582,8 @@ def collect_all_bug_fix_commits(commits, importance,
 #
 
 
-
-
-
 def compute_all_blame(project, guilt_data, combined_commits,
-                      clear_cache=False):
+                          clear_cache=False):
     """Computes blame data for commits identified in guilt_data"""
 
     repo_name = get_repo_name(project)
@@ -633,7 +635,8 @@ def compute_all_blame(project, guilt_data, combined_commits,
                 d = c.diff(p, create_patch=True, paths=pair['a_path'])
                 diff_text = d[0].diff
                 # print diff_text
-                fname, blame_data = assign_blame(pair['b_path'], diff_text,
+                # fname, blame_data = assign_blame(pair['b_path'], diff_text,
+                fname, blame_data = assign_blame2(d[0], pair['b_path'], diff_text,
                                                  be['blame_commit'],
                                                  repo_name,
                                                  be['diff_commit'])
@@ -666,6 +669,7 @@ def compute_all_blame(project, guilt_data, combined_commits,
         for k in blame_cache.keys():   # remove key artifact from jload
             if 'json_key' in blame_cache[k]:
                 del blame_cache[k]['json_key']
+
 
 #
 # Identify Bug Fixes along Mainline
@@ -807,7 +811,7 @@ def commit_postprocessing(project, importance='low+',
     commit relevance and annotates commit ordering.
     """
     if rebuild:    # Only rebuilds combined_commits
-        rebuild_all_analysis_data(PROJECT, update=rebuild_incr,
+        rebuild_all_analysis_data(project, update=rebuild_incr,
                                   download=rebuild_with_download)
 
     all_bugs, all_changes, all_change_details, \
@@ -816,9 +820,8 @@ def commit_postprocessing(project, importance='low+',
     import_all_bugs(all_bugs)  # hack to make bug data visible
     legacy_cutoff = find_legacy_cutoff(combined_commits)
 
-    guilt_data = build_all_guilt(project, combined_commits,
-                                 importance=importance,
-                                 wip=wip)
+    build_all_guilt(project, combined_commits,
+                    importance=importance, wip=wip)
 
     # Use git_blame to tag commits for inclusion in feature set
     annotate_commit_reachability(project, combined_commits)
