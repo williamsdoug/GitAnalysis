@@ -82,6 +82,11 @@ import itertools
 # from git_analysis_config import get_repo_name
 
 
+class ParserError(Exception):
+    """Generic error for parser-related issues."""
+    pass
+
+
 def debug_ast_strip_lineno(line):
     """Strips lineno and col_offset from ast.dump output"""
     line = re.sub(r",?\s+lineno=-?\d+", "", line)
@@ -264,8 +269,13 @@ def treeViewer(tree, idxTree, depth=0, indent=4, trim=False,
 
 def get_st_from_blob(blob, verbose=False):
     """Extracts Syntax Tree (AST) from git blob"""
-
-    st = ast.parse(blob.data_stream.read(), filename=blob.path)
+    try:
+        st = ast.parse(blob.data_stream.read(), filename=blob.path)
+    except SyntaxError:
+        print
+        print 'Syntax Error while processing: ', blob.path
+        print
+        raise ParserError
     return st
 
 
@@ -979,23 +989,11 @@ def performDiff(d, verbose=False):
 
     matchA, matchB = parse_diff_txt(d.diff, d.a_blob, d.b_blob)
 
-    try:
-        st_a = get_st_from_blob(d.a_blob)
-    except SyntaxError:
-        print
-        print 'ERROR: Syntax Error while processing: ', d.a_blob.path
-        print
-        return False, False, False, False
-
+    st_a = get_st_from_blob(d.a_blob)
     treeA, idxA = buildTree(st_a, len(matchA) - 1, matchA,
                             getBlobData(d.a_blob))
 
-    try:
-        st_b = get_st_from_blob(d.b_blob)
-    except SyntaxError:
-        print 'Syntax Error while processing: ', d.a_blob.path
-        return False, False, False, False
-
+    st_b = get_st_from_blob(d.b_blob)
     treeB, idxB = buildTree(st_b, len(matchB) - 1, matchB,
                             getBlobData(d.b_blob))
 

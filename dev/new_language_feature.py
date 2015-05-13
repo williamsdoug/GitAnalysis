@@ -38,8 +38,7 @@ import radon.metrics
 from git_analysis_config import get_repo_name, get_filter_config
 from python_introspection import get_total_nodes, get_stats
 from python_introspection import getDepth
-from NewDiff import performDiff, getRangesForBlame, treeViewer
-
+from NewDiff import performDiff, getRangesForBlame, treeViewer, ParserError
 
 #
 # WARNING HACK: Clones of functions from Git_Extract duplicatee to avoid
@@ -67,7 +66,13 @@ def filter_file(fname, filter_config):
 def get_st_from_blob(blob, verbose=False):
     """Extracts Syntax Tree (AST) from git blob"""
     txt = blob.data_stream.read()
-    st = ast.parse(txt, filename=blob.path)
+    try:
+        st = ast.parse(txt, filename=blob.path)
+    except SyntaxError:
+        print
+        print 'Syntax Error while processing: ', blob.path
+        print
+        raise ParserError
     return st, txt.split('\n')
 
 
@@ -271,6 +276,12 @@ def processDiff(d, verbose=False):
     total_new_functions = 0
     total_new_classes = 0
 
+    if treeA is False or treeB is False:
+        raise ParserError
+
+    if not isinstance(treeA['ast'], ast.Module):
+        print type(treeA['ast']), treeA['ast'], treeA
+
     assert isinstance(treeA['ast'], ast.Module)
     assert isinstance(treeB['ast'], ast.Module)
 
@@ -320,7 +331,18 @@ def processDiff(d, verbose=False):
 
 
 def process_commit_diff(c, filter_config, verbose=False):
-    """Apply language sensitive diff to each changed file"""
+    """Apply language sensitive diff to each changed file
+    Note:  This is wrapper for error handling
+    """
+    try:
+        process_commit_diff_helper(c, filter_config, verbose=verbose)
+    except ParserError:
+        return {'invalid': True}
+
+
+def process_commit_diff_helper(c, filter_config, verbose=False):
+    """Apply language sensitive diff to each changed file
+    Note:  This routine does actual work"""
     # global START
     cid = c.hexsha
     if True or verbose:
@@ -370,30 +392,25 @@ def process_commit_diff(c, filter_config, verbose=False):
             elif not isValidBlob(d.b_blob):
                 if verbose:
                     print 'Add A'
-                try:
-                    result = process_commit_add(d, verbose=verbose)
+                result = process_commit_add(d, verbose=verbose)
+                if result['changes'] > 0:
+                    getMetrics(d.a_blob, result, verbose=True)
+                    results.append(result)
+                    if verbose:
+                        pprint(result)
+            elif (isValidBlob(d.a_blob) and isValidBlob(d.b_blob)
+                  and d.b_blob.path.endswith('.py')):
+                    result = processDiff(d)  # , verbose=verbose)
+                    # print '*',
+                    # sys.stdout.flush()
                     if result['changes'] > 0:
-                        getMetrics(d.a_blob, result, verbose=True)
+                        getMetrics(d.b_blob, result, verbose=True)
                         results.append(result)
                         if verbose:
                             pprint(result)
-                except SyntaxError:
-                    pass
-            elif (isValidBlob(d.a_blob) and isValidBlob(d.b_blob)
-                  and d.b_blob.path.endswith('.py')):
-                    try:
-                        result = processDiff(d)  # , verbose=verbose)
-                        # print '*',
-                        # sys.stdout.flush()
-                        if result['changes'] > 0:
-                            getMetrics(d.b_blob, result, verbose=True)
-                            results.append(result)
-                            if verbose:
-                                pprint(result)
-                    except SyntaxError:
-                        pass
             else:
-                raise Exception('Unknown change format')
+                print 'process_commit_diff_helper: Unknown change format'
+                raise ParserError
 
     ret = {}
     if len(results) > 0:
@@ -415,11 +432,16 @@ def getLineno(tree):
         return None
 
 
-
 def processDiffForBlame(d, verbose=False):
-    return getRangesForBlame(d, verbose=verbose)
+    try:
+        return getRangesForBlame(d, verbose=verbose)
+    except ParserError:
+        return -1
+
+
 # Debug code, should be deleted once no longer needed
 #
+
 
 def test_all_git_commits(project, verbose=False, limit=-1, skip=-1):
     """Top level routine to generate commit data """
@@ -438,7 +460,6 @@ def new_process_commits(repo, commits, filter_config,
                         skip=-1, limit=-1, verbose=False):
     """Extracts all commit from git repo, subject to max_count limit"""
     total_operations = 0
-    total_errors = 0
 
     for h in repo.heads:
         for c in repo.iter_commits(h):
@@ -452,11 +473,16 @@ def new_process_commits(repo, commits, filter_config,
             print 'CID:', cid
             if cid in commits:
                 continue
-            # try:
-            commits[cid] = {}
-            diff_result = process_commit_diff(c, filter_config,
-                                              verbose=verbose)
-            commits[cid].update(diff_result)
+            try:
+                commits[cid] = {}
+                diff_result = process_commit_diff(c, filter_config,
+                                                  verbose=verbose)
+                commits[cid].update(diff_result)
+            except ParserError:
+                commits[cid]['invalid'] = True
+                print
+                print 'PARSER ERROR, skipping CID:', cid
+                print
 
             total_operations += 1
             if total_operations % 10 == 0:
