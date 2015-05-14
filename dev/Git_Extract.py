@@ -107,7 +107,7 @@
 # - 4/26/15 - Integrate PyDiff and and process_commit_diff feature extraction
 #             from language_feature
 # - 5/13/15 - Integrate with NewDiff (successor to PyDiff)
-# - 5/14/15 - Clean-up empty blame error handling
+# - 5/14/15 - Clean-up empty blame error handling.  Add checkpoining
 #
 #
 # Top Level Routines:
@@ -456,10 +456,10 @@ def parse_msg(msg, patch=False):
 #
 
 def process_commits(repo, commits, filter_config,
-                    skip=-1, limit=-1, verbose=False, use_pydiff=False):
+                    skip=-1, limit=-1, verbose=False,
+                    use_pydiff=False, checkpoint=500, project=None):
     """Extracts all commit from git repo, subject to limit"""
     total_operations = 0
-    total_errors = 0
 
     for h in repo.heads:
         for c in repo.iter_commits(h):
@@ -499,14 +499,15 @@ def process_commits(repo, commits, filter_config,
             if total_operations % 1000 == 0:
                 print total_operations,
                 sys.stdout.flush()
+            if project and total_operations % checkpoint == 0:
+                print 'checkpointing',
+                save_git_commits(commits, project)
+                print 'done',
+                sys.stdout.flush()
 
             limit -= 1
             if limit == 0:
                 return commits
-
-    if total_errors > 0:
-        print
-        print 'Commits skipped due to error:', total_errors
 
     # Now identify those commits within Master branch
     print
@@ -788,7 +789,7 @@ def build_git_commits(project, update=True, include_patch=False,
 
     commits = process_commits(repo, commits, get_filter_config(project),
                               use_pydiff=use_pydiff, skip=skip, limit=limit,
-                              verbose=verbose)
+                              project=project, verbose=verbose)
     print
     print 'total commits:', len(commits)
     """
@@ -814,6 +815,11 @@ def build_git_commits(project, update=True, include_patch=False,
     """
 
     annotate_children(commits)   # note parent/child relationships
+    save_git_commits(commits, project_to_fname(project))
+
+
+def save_git_commits(commits, project):
+    """Top level routine to save git commit data"""
     jdump(commits, project_to_fname(project))
 
 
