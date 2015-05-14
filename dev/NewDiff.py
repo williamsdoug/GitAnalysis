@@ -13,6 +13,7 @@
 # - 5/11/15 - Add support for generation of blame mask.
 # - 5/12/15 - Fix handling of TryExcept
 # - 5/13/15 - Integration with end-to-end blame processing
+# - 5/14/15 - Bug fix for TryExcept, other error handling
 #
 #
 # Top Level Routines:
@@ -78,6 +79,7 @@ from pprint import pprint
 import collections
 import re
 import itertools
+import git
 
 # sys.path.append('./dev')
 # from git_analysis_config import get_repo_name
@@ -875,6 +877,9 @@ def matchTryExcept(idxTree, otherIdxTree, verbose=False):
         origOtherMismatch = otherParent['mismatch']
         total_matches = 0
 
+        if 'subtreesIdx' not in tree or 'subtreesIdx' not in otherParent:
+            continue
+
         for i in tree['subtreesIdx']:
             thisTree = idxTree[i]
             for j in otherParent['subtreesIdx']:
@@ -979,7 +984,7 @@ def performDiff(d, verbose=False):
     """Perform diff operation on individual file"""
     if not d.b_blob or not d.b_blob.path.endswith('.py'):
         print 'Error:  Invalid blob for performDiff', d.b_blob
-        assert False
+        raise git.BadObject
     if verbose:
         print
         print '+'*60

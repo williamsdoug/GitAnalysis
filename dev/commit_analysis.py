@@ -5,7 +5,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 3/11/2015
+# Last updated 5/14/2015
 #
 # History:
 # - 9/2/14:  Initial version (initially contained in NovaSampleData).
@@ -41,6 +41,9 @@
 # - 3/10/15 - remove trailing >" in parse_author_and_org()
 # - 3/10/15 - extract_features() now returns features in sorted order
 # - 3/11/15 - Adds dedupe support to commit feature extraction
+# - 4/26/15 - Integrate language_specific features
+# - 5/14/15 - Integrate with NewDiff, remove proximity in
+#             blame_compute_normalized_guilt(), adds error handling.
 #
 #
 # Top Level Routines:
@@ -330,11 +333,20 @@ def parse_author_and_org(auth):
     return author_name, author_org
 
 
+def log1(val):
+    """returns log(n+1), needed fir zero-based values"""
+    return math.log(float(val)+1)
+
+
 def add_commit_features(c, feats, git_actor_dedupe_table,
                         include_committer=True,
                         include_order=True,
                         include_files=True,
-                        include_lines_of_code=True,
+                        include_lines_of_code=False,  # legacy
+                        include_code_metrics=True,      # python-specific
+                        include_per_file_metrics=True,  # python-specific
+                        include_test_metrics=True,      # python-specific
+                        include_test_per_file_metrics=True,  # python-specific
                         include_blueprint=True,
                         include_cherrypick=True,):
     """Extract informaton related to Git Commit"""
@@ -380,6 +392,35 @@ def add_commit_features(c, feats, git_actor_dedupe_table,
             for fname, detail in c['loc_detail'].items():
                 feats['loc_add_' + fname] = detail['add']
                 feats['loc_changes_' + fname] = detail['changes']
+
+    if 'aggregate' in c and include_code_metrics:
+        feats['cc'] = log1(c['aggregate']['cc'])
+        feats['changes'] = log1(c['aggregate']['changes'])
+        feats['complexity'] = log1(c['aggregate']['complexity'])
+        feats['new_functions'] = c['aggregate']['new_functions']
+        feats['new_classes'] = c['aggregate']['new_classes']
+        feats['lloc'] = log1(c['aggregate']['lloc'])
+        feats['nodes'] = log1(c['aggregate']['nodes'])
+
+        if include_per_file_metrics:
+            for fname, v in c['individual'].items():
+                if include_test_per_file_metrics or 'test' not in fname:
+                    feats[fname + '_cc'] = log1(v['cc'])
+                    feats[fname + '_changes'] = log1(v['changes'])
+                    feats[fname + '_complexity'] = log1(v['complexity'])
+                    feats[fname + '_new_functions'] = v['new_functions']
+                    feats[fname + '_new_classes'] = v['new_classes']
+                    feats[fname + '_lloc'] = log1(v['lloc'])
+                    feats[fname + '_nodes'] = log1(v['nodes'])
+
+        if include_test_metrics:
+            feats['test_cc'] = log1(c['aggregate']['test_cc'])
+            feats['test_changes'] = log1(c['aggregate']['test_changes'])
+            feats['test_complexity'] = log1(c['aggregate']['test_complexity'])
+            feats['test_new_functions'] = c['aggregate']['test_new_functions']
+            feats['test_new_classes'] = c['aggregate']['test_new_classes']
+            feats['test_lloc'] = log1(c['aggregate']['test_lloc'])
+            feats['test_nodes'] = log1(c['aggregate']['test_nodes'])
 
     if include_blueprint:
         feats['blueprint'] = 'blueprint' in c
@@ -480,7 +521,7 @@ def create_feature(c, git_actor_dedupe_table,
 
 
 # should we clip based on max distance???
-def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
+def old_blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
     """Apportions guilt for each blame entry to individual commits
        based on proximity to changed lines and number of occurances,
        where total guilt for each blame entry is 1.  Guild is weighted
@@ -502,6 +543,31 @@ def blame_compute_normalized_guilt(blameset, exp_weighting=True, exp=2.0):
                     weight = 1.0/float(per_line['proximity'])
                 result[per_line['commit']] += weight
                 total += weight
+    if total > 0:
+        return dict([[k, v/total] for k, v in result.items()])
+    else:
+        return {}
+
+
+def blame_compute_normalized_guilt(blameset):
+    """Apportions guilt for each blame entry to individual commits
+       based number of occurances, where total guilt for each blame
+       entry is 1.
+    """
+    result = collections.defaultdict(float)
+    total = 0.0
+    for fname, per_file in blameset['blame'].items():
+        if not per_file:   # validate not null entry
+            continue
+        if isinstance(per_file, int):
+            # -1 is error value
+            print 'blame_compute_normalized_guilt: ignoring', fname, per_file
+            continue
+
+        for per_line in per_file:
+            result[per_line['commit']] += 1
+            total += 1
+
     if total > 0:
         return dict([[k, v/total] for k, v in result.items()])
     else:
