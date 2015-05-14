@@ -6,7 +6,7 @@
 #
 # Currently being tested using OpenStack (Nova, Swift, Glance, Cinder, Heat)
 #
-# Last updated 5/13/2015
+# Last updated 5/14/2015
 #
 # History:
 # - 8/10/14: fix change_id (was Change-Id) for consistency, make leading I in
@@ -107,6 +107,7 @@
 # - 4/26/15 - Integrate PyDiff and and process_commit_diff feature extraction
 #             from language_feature
 # - 5/13/15 - Integrate with NewDiff (successor to PyDiff)
+# - 5/14/15 - Clean-up empty blame error handling
 #
 #
 # Top Level Routines:
@@ -485,9 +486,11 @@ def process_commits(repo, commits, filter_config,
 
             commits[cid].update(parse_msg(c.message))
             if use_pydiff:
+                # print 'calling process_commit_diff'
                 diff_result = process_commit_diff(c, filter_config,
                                                   verbose=verbose)
-                commits[cid].update(diff_result)
+                if diff_result:
+                    commits[cid].update(diff_result)
 
             total_operations += 1
             if total_operations % 100 == 0:
@@ -840,7 +843,7 @@ def load_git_commits(project):
 
 def get_blame(cid, path, repo_name,
               child_cid='', ranges=[],
-              include_cc=False, warn=False):
+              include_cc=False, warn=True):
     """Compute per-line blame for individual file for a commit """
 
     # print 'Calling get_blame', ranges, path
@@ -902,7 +905,7 @@ def get_blame(cid, path, repo_name,
     if len(result) == 0:
         if warn:
             print 'Warning -- Empty Blame for ', cid, path
-        return False
+        return []
     return result
 
 # Note: find_diff_ranges() only used for non-python files
@@ -954,9 +957,15 @@ def assign_blame2(d, path, diff_text, p_cid, repo_name,
                 ranges = getRangesForBlame(d)
             except ParserError:
                 print
-                print 'error during blame extraction, commit should be ignored'
+                print ' ParserError during blame extraction,',
+                print ' commit should be ignored'
                 print
-                # TO DO:  Insert error handling here
+                return [path, -1]
+            except git.BadObject:
+                print
+                print 'BadObject during blame extraction,',
+                print ' commit should be ignored'
+                print
                 return [path, -1]
         else:  # Code path for non-python files
             result = parse_diff(diff_text)
