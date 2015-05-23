@@ -4,6 +4,7 @@ import theano
 from theano import tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano import Param
+from theano import printing
 
 import numpy as np
 
@@ -95,12 +96,24 @@ def my_weighted_categorical_crossentropy(output, target):
                         'mismatched ndims not supported')
 
 
+def compute_F1(TARGET, OUTPUT):
+    TP = T.maximum(T.sum(TARGET[:, 1] * OUTPUT[:, 1]), 0.00001)
+    FP = T.sum(TARGET[:, 0] * OUTPUT[:, 1])
+    FN = T.sum(TARGET[:, 1] * OUTPUT[:, 0])
+    # TN = T.maximum(T.sum(TARGET[:, 0] * OUTPUT[:, 0]), 0.001)
+
+    F1 = 2.0 * TP / (2.0 * TP + FN + FP)
+    # F1N = 2.0 * TN / (2.0 * TN + FN + FP)
+    # NF1 = (FN + FP) / (2.0 * TP + FN + FP)
+
+    return F1
 #
 # Build Integrated Model
 #
 
 
-def build_nn(model, dimensions=[], update='sgd', use_binary_crossentropy=False,
+def build_nn(model, dimensions=[], update='sgd',
+             use_binary_crossentropy=False, use_F1_cost=False,
              uses_dropout=False, p_drop_input=0.2, p_drop_hidden=0.5):
     """Values for model are 'classic' and 'modern'"""
 
@@ -139,7 +152,6 @@ def build_nn(model, dimensions=[], update='sgd', use_binary_crossentropy=False,
 
     if len(dimensions) == 3 and not uses_dropout:
         py_x = model(X, w_h, w_o)
-        floatX([bias, -bias])
     elif len(dimensions) == 3 and uses_dropout:
         noise_h, noise_py_x = model(X, w_h, w_o,
                                     p_drop_input, p_drop_hidden)
@@ -162,6 +174,11 @@ def build_nn(model, dimensions=[], update='sgd', use_binary_crossentropy=False,
             cost = T.mean(T.nnet.binary_crossentropy(noise_py_x, Y))
         else:
             cost = T.mean(T.nnet.binary_crossentropy(py_x, Y))
+    elif use_F1_cost:  # Disabled, currently doesn't work
+        if uses_dropout:
+            cost = compute_F1(noise_py_x, Y)
+        else:
+            cost = compute_F1(py_x, Y)
     else:   # categorical_crossentropy
         if uses_dropout:
             cost = T.mean(my_weighted_categorical_crossentropy(noise_py_x, Y))
@@ -293,19 +310,13 @@ def convert_binary_to_onehot(Y):
     return np.vstack((not_Y.astype(int), Y)).T
 
 
-def biased_argmax(y, bias=0.0):
-    if bias == 0.0:
-        y[:, 1] = y[:, 1] * bias
-    return np.argmax(y, axis=1)
-
-
 def compute_stats(y_predict, y_target):
     cost = np.mean(y_target == y_predict)
-    TP = np.sum(np.logical_and(y_predict, y_target))
+    TP = max(np.sum(np.logical_and(y_predict, y_target)), 0.0001)
     FP = np.sum(np.logical_and(y_predict, np.logical_not(y_target)))
     FN = np.sum(np.logical_and(np.logical_not(y_predict), y_target))
-    TN = np.sum(np.logical_and(np.logical_not(y_predict),
-                np.logical_not(y_target)))
+    TN = max(np.sum(np.logical_and(np.logical_not(y_predict),
+                    np.logical_not(y_target))), 0.0001)
     precision = float(TP)/float(TP+FP)
     recall = float(TP)/float(TP+FN)
     f1 = (2.0 * TP / (2.0 * TP + FP + FN)) if (TP + FP + FN) > 0 else 0.0
@@ -374,21 +385,39 @@ def test_nn(model, trX, teX, trY, teY,
             or i % 10 == 0
                 or best_i == i):
             print_stats(i, cost, TP, FP, FN, TN, precision, recall, f1)
-            print '    Best Prec: {0:0.2f} Recall: {1:0.2f}, F1: {2:0.2f}  i: {3}'.format(best_precision, best_recall,
-                                                                                         best_f1, best_i)
+            print ('    Best Prec: {0:0.2f} Recall: {1:0.2f},'
+                   ' F1: {2:0.2f}  i: {3}').format(best_precision,
+                                                   best_recall,
+                                                   best_f1, best_i)
             print
             sys.stdout.flush()
 
         if (i != 0) and (i > relative_best_i + max_distance):
-            lr = lr * 0.31623
+            lr = lr * 0.1
             if lr < min_lr:
                 print
                 print 'Final Result'
-                print '    Best Prec: {0:0.2f} Recall: {1:0.2f}, F1: {2:0.2f}  i: {3}'.format(best_precision, best_recall,
-                                                                                         best_f1, best_i)
+                print ('    Best Prec: {0:0.2f} Recall: {1:0.2f},'
+                       ' F1: {2:0.2f}  i: {3}').format(best_precision,
+                                                       best_recall,
+                                                       best_f1, best_i)
+
+                set_weights(*best_weights)
+                relative_best_i = i
+
+                # Now validate results
+                print 'Validating restored results'
+                y_predict = predict(teX)
+                y_target = np.argmax(teY, axis=1)
+                (cost, TP, FP, FN, TN,
+                 precision, recall, f1) = compute_stats(y_predict, y_target)
+                print_stats(i, cost, TP, FP, FN, TN, precision, recall, f1)
+                print
+                sys.stdout.flush()
                 return predict, best_weights, best_f1
             print
-            print '{0}: Resetting to iteration {1}, LR now {2:f}'.format(i, best_i, lr)
+            print ('{0}: Resetting to iteration {1},'
+                   ' LR now {2:f}').format(i, best_i, lr)
             print
             sys.stdout.flush()
             set_weights(*best_weights)
@@ -403,5 +432,18 @@ def test_nn(model, trX, teX, trY, teY,
             print_stats(i, cost, TP, FP, FN, TN, precision, recall, f1)
             print
             sys.stdout.flush()
+
+    set_weights(*best_weights)
+    relative_best_i = i
+
+    # Now validate results
+    print 'Validating restored results'
+    y_predict = predict(teX)
+    y_target = np.argmax(teY, axis=1)
+    (cost, TP, FP, FN, TN,
+     precision, recall, f1) = compute_stats(y_predict, y_target)
+    print_stats(i, cost, TP, FP, FN, TN, precision, recall, f1)
+    print
+    sys.stdout.flush()
 
     return predict, best_weights, best_f1
