@@ -36,6 +36,7 @@
 #            handled upstream in get_bug_fix_weight
 # - 5/13/15:  Integrate with NewDiff and new_language_feature.  (changes mostly
 #             in Git_Extract)
+# - 5/27/15 - Return legacy_cutoff as part of commit_postprocessing()
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -835,7 +836,7 @@ def commit_postprocessing(project, importance='low+',
     print 'Order range for non-legacy comits'
     print '  min:', min_order
     print '  max:', max_order
-    return combined_commits
+    return combined_commits, legacy_cutoff
 
 #
 # Code for determining commit reachability
@@ -1009,13 +1010,15 @@ def export_feature_vectors_to_csv(project, importance='med+',
                                  guilt threshold)
        - <project>_feature_info.csv (contains commit id, actual guilt value)
     """
-    combined_commits = commit_postprocessing(project, importance, wip=wip)
+    combined_commits, legacy_cutoff = commit_postprocessing(project,
+                                                            importance,
+                                                            wip=wip)
     print 'combined_commits:', len(combined_commits)
 
     fname = get_corpus_dir(project) + project + suffix
     print fname
 
-    legacy_cutoff = find_legacy_cutoff(combined_commits)
+    # legacy_cutoff = find_legacy_cutoff(combined_commits)
     min_order, max_order = get_commit_ordering_min_max(combined_commits)
     actual_bugs = compute_selected_bug_fixes(combined_commits,
                                              legacy_cutoff=legacy_cutoff,

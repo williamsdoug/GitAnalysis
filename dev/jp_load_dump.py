@@ -19,7 +19,7 @@ import json
 def convert_to_builtin_type(obj):
     try:
         d = repr(obj)
-    except Exception, e:
+    except Exception:
         if str(type(obj)) == "<class 'git.util.Actor'>":
             d = ('<git.Actor "' + obj.name.encode('ascii', 'ignore') +
                  ' <' + obj.email + '>">')
@@ -41,7 +41,7 @@ def jdump_helper(x, f, item_per_line=True):
             try:
                 f.write(json.dumps(v, default=convert_to_builtin_type))
                 f.write("\n")
-            except Exception, e:
+            except Exception:
                 skipped += 1
                 # print 'Error in json dumps', e
                 # pp.pprint(v)
@@ -55,7 +55,7 @@ def jdump_helper(x, f, item_per_line=True):
                 v['json_key'] = k
                 f.write(json.dumps(v, default=convert_to_builtin_type))
                 f.write("\n")
-            except Exception, e:
+            except Exception:
                 skipped += 1
                 # print 'Error in json dumps', e, 'key:', k
                 # pp.pprint(v)

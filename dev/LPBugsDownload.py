@@ -33,11 +33,11 @@
 #
 
 from launchpadlib.launchpad import Launchpad
-import pprint as pp
-import httplib2
+# import pprint as pp
+# import httplib2
 import os
 
-from jp_load_dump import pdump, pload, jdump, jload
+from jp_load_dump import jdump, jload
 from git_analysis_config import get_corpus_dir, get_lpcache_dir
 
 #
@@ -137,7 +137,7 @@ def lp_fetch_object(obj,
                         result[name] = str(getattr(obj, name))
                     else:
                         result[name] = getattr(obj, name)
-                except Exception, e:
+                except Exception:
                     pass
             elif debug:
                 print 'Skipping', name
@@ -151,7 +151,7 @@ def lp_fetch_object(obj,
                         result[name] = str(getattr(obj, name))
                     else:
                         result[name] = getattr(obj, name)
-                except Exception, e:
+                except Exception:
                     pass
             elif debug:
                 print 'Skipping', name
@@ -162,7 +162,7 @@ def lp_fetch_object(obj,
             if name not in exclude:
                 try:
                     result[name] = [x for x in getattr(obj, name)]
-                except Exception, e:
+                except Exception:
                     pass
             elif debug:
                 print 'Skipping', name
@@ -380,7 +380,7 @@ def build_lp_bugs(project, update=True, limit=-1):
     if existing_file:
         try:
             os.rename(pname, pname+'.old')
-        except Exception, e:
+        except Exception:
             pass
     jdump(ALL_BUGS, pname)
 

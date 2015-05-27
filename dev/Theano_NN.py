@@ -4,7 +4,7 @@ import theano
 from theano import tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano import Param
-from theano import printing
+# from theano import printing
 
 import numpy as np
 
@@ -97,14 +97,15 @@ def my_weighted_categorical_crossentropy(output, target):
 
 
 def compute_F1(TARGET, OUTPUT):
-    TP = T.maximum(T.sum(TARGET[:, 1] * OUTPUT[:, 1]), 0.00001)
+    TP = T.sum(TARGET[:, 1] * OUTPUT[:, 1])
     FP = T.sum(TARGET[:, 0] * OUTPUT[:, 1])
     FN = T.sum(TARGET[:, 1] * OUTPUT[:, 0])
-    # TN = T.maximum(T.sum(TARGET[:, 0] * OUTPUT[:, 0]), 0.001)
+    # TN = T.sum(TARGET[:, 0] * OUTPUT[:, 0])
 
-    F1 = 2.0 * TP / (2.0 * TP + FN + FP)
-    # F1N = 2.0 * TN / (2.0 * TN + FN + FP)
-    # NF1 = (FN + FP) / (2.0 * TP + FN + FP)
+    # Add small number below to avoid divide by zero
+    F1 = 2.0 * TP / (2.0 * TP + FN + FP + 0.00001)
+    # F1N = 2.0 * TN  / (2.0 * TN + FN + FP + 0.00001)
+    # NF1 = (FN + FP) / (2.0 * TP + FN + FP + 0.00001)
 
     return F1
 #
@@ -312,13 +313,13 @@ def convert_binary_to_onehot(Y):
 
 def compute_stats(y_predict, y_target):
     cost = np.mean(y_target == y_predict)
-    TP = max(np.sum(np.logical_and(y_predict, y_target)), 0.0001)
+    TP = np.sum(np.logical_and(y_predict, y_target))
     FP = np.sum(np.logical_and(y_predict, np.logical_not(y_target)))
     FN = np.sum(np.logical_and(np.logical_not(y_predict), y_target))
-    TN = max(np.sum(np.logical_and(np.logical_not(y_predict),
-                    np.logical_not(y_target))), 0.0001)
-    precision = float(TP)/float(TP+FP)
-    recall = float(TP)/float(TP+FN)
+    TN = np.sum(np.logical_and(np.logical_not(y_predict),
+                np.logical_not(y_target)))
+    precision = float(TP)/float(TP + FP + 0.00001)
+    recall = float(TP)/float(TP + FN + 0.00001)
     f1 = (2.0 * TP / (2.0 * TP + FP + FN)) if (TP + FP + FN) > 0 else 0.0
     return (cost, TP, FP, FN, TN, precision, recall, f1)
 
@@ -334,13 +335,13 @@ def print_stats(i, cost, TP, FP, FN, TN, precision, recall, f1):
 def test_nn(model, trX, teX, trY, teY,
             iterations=6, dimensions=[], update='sgd',
             uses_dropout=False, p_drop_input=0.2, p_drop_hidden=0.5,
-            lr=0.001, batch=128,
+            lr=0.001, batch=512,  # batch=128,
             use_binary_crossentropy=False,
-            max_distance=30, min_lr=False,
+            max_distance=100, min_lr=False,
             bias=0.0):
 
     if min_lr is False:
-        min_lr = lr / 10.0**3
+        min_lr = lr
 
     (train, predict, get_weights,
      set_weights) = build_nn(model, dimensions=dimensions,

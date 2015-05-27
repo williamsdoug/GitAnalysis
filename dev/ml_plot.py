@@ -9,7 +9,6 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-import math
 import random
 
 from sklearn.learning_curve import learning_curve
@@ -23,7 +22,7 @@ from commit_analysis import extract_features
 from commit_analysis import autoset_threshold
 from BugFixWorkflow import compute_selected_bug_fixes
 from BugFixWorkflow import commit_postprocessing
-from BugFixWorkflow import find_legacy_cutoff
+# from BugFixWorkflow import find_legacy_cutoff
 
 
 class PredictCV(object):
@@ -80,7 +79,11 @@ class PredictCV(object):
             raise Exception('Invalid value for ignore')
 
         if history + future >= self.n:
-            raise Exception('history + future exceeds n')
+            print 'Warning: history+future exceeds n', history, future, int(n)
+            history = self.n - future - 1
+            self.history = history
+            print '         clipping history to:', history
+            # raise Exception('history + future exceeds n')
 
     def __iter__(self):
         for i in range(self.n_iter):
@@ -123,9 +126,10 @@ def PredictCV_TrainTestValidate(X, Y, train_size=50, test_size=50,
 
 
 def get_dataset(project, importance):
-    combined_commits = commit_postprocessing(project, importance=importance)
+    (combined_commits,
+     legacy_cutoff) = commit_postprocessing(project, importance=importance)
 
-    legacy_cutoff = find_legacy_cutoff(combined_commits)
+    # legacy_cutoff = find_legacy_cutoff(combined_commits)
     min_order, max_order = get_commit_ordering_min_max(combined_commits)
     actual_bugs = compute_selected_bug_fixes(combined_commits,
                                              legacy_cutoff=legacy_cutoff,
@@ -188,10 +192,10 @@ def eval_predictions(clf, X, Y, history_sizes=[], future_sizes=[], n_iter=10):
                 X_test = X[test_idx]
                 Y_test = Y[test_idx]
                 clf.fit(X_train, Y_train)
-                val = eval_clf(clf, X_test, Y_test, verbose=False)
-                val['history'] = history
-                val['future'] = future
-                results.append(val)
+                value = eval_clf(clf, X_test, Y_test, verbose=False)
+                value['history'] = history
+                value['future'] = future
+                results.append(value)
             # Show aggregated results
             print title
             print

@@ -24,7 +24,7 @@
 import ast
 from pprint import pprint
 import collections
-import re
+# import re
 from git import Repo
 import git
 import sys
@@ -38,7 +38,7 @@ import radon.metrics
 from git_analysis_config import get_repo_name, get_filter_config
 from python_introspection import get_total_nodes, get_stats
 from python_introspection import getDepth
-from NewDiff import performDiff, getRangesForBlame, treeViewer, ParserError
+from NewDiff import performDiff, treeViewer, ParserError
 
 #
 # WARNING HACK: Clones of functions from Git_Extract duplicatee to avoid
@@ -94,9 +94,9 @@ def get_cc(st):
     """Wraps CC, inserting dummy function if needed"""
 
     if (isinstance(st, ast.FunctionDef) or isinstance(st, ast.FunctionDef)
-        or isinstance(st, ast.Module)):
-            this_st = st
-            wrapped = False
+            or isinstance(st, ast.Module)):
+        this_st = st
+        wrapped = False
     else:
         this_st = ASTwrapper(st)
         wrapped = True
@@ -210,7 +210,7 @@ def computeChanges(tree, idxTree, depth=0, verbose=False):
         treeViewer(tree, idxTree, trim=True)
         print
 
-    if 'pair' in tree:
+    if 'pair' in tree and 'subtreesIdx' in tree:
         if 'header_mismatch' in tree and tree['header_mismatch'] > 0:
             changes += 1
             node_type = type(tree['ast']).__name__.split('.')[-1]
@@ -280,11 +280,11 @@ def processDiff(d, verbose=False):
 
     if verbose:
         print 'printing tree A'
-        treeViewer(treeA, idxA, trim=False, idxOther=idxB)
+        treeViewer(treeA, idxA, trim=True, idxOther=idxB)
         print
 
         print 'printing tree B'
-        treeViewer(treeB, idxB, trim=False, idxOther=idxA)
+        treeViewer(treeB, idxB, trim=True, idxOther=idxA)
         print
 
     if 'subtreesIdx' in treeA:
@@ -298,7 +298,8 @@ def processDiff(d, verbose=False):
                 print 'printing subtree'
                 treeViewer(tree, idxA, trim=True, idxOther=idxB)
 
-            changes, cc, new_functions, new_classes = computeChanges(tree, idxA)
+            (changes, cc,
+             new_functions, new_classes) = computeChanges(tree, idxA)
             if verbose:
                 print 'compute changes returned', changes, cc,
                 print new_functions, new_classes
@@ -327,7 +328,7 @@ def process_commit_diff(c, filter_config, verbose=False):
     Note:  This is wrapper for error handling
     """
     try:
-        process_commit_diff_helper(c, filter_config, verbose=verbose)
+        return process_commit_diff_helper(c, filter_config, verbose=verbose)
     except ParserError:
         return {'invalid': True}
 
@@ -336,13 +337,13 @@ def process_commit_diff_helper(c, filter_config, verbose=False):
     """Apply language sensitive diff to each changed file
     Note:  This routine does actual work"""
     # global START
+
     cid = c.hexsha
-    if True or verbose:
+    if verbose:
         print
         print 'CID:', cid
     sys.stdout.flush()
 
-    files = []
     results = []
     # for p in c.parents:    # iterate through each parent
     if len(c.parents) > 0:
@@ -354,7 +355,7 @@ def process_commit_diff_helper(c, filter_config, verbose=False):
         # An add appears both as an add and a modify with null blob_a
 
         for d in i:
-            if True or verbose:  # verbose:
+            if verbose:  # verbose:
                 print
                 print 'A:', d.a_blob,
                 if isValidBlob(d.a_blob):
@@ -392,10 +393,12 @@ def process_commit_diff_helper(c, filter_config, verbose=False):
                         pprint(result)
             elif (isValidBlob(d.a_blob) and isValidBlob(d.b_blob)
                   and d.b_blob.path.endswith('.py')):
-                    result = processDiff(d)  # , verbose=verbose)
-                    # print '*',
-                    # sys.stdout.flush()
-                    if result['changes'] > 0:
+                if verbose:
+                    print 'Modify'
+                result = processDiff(d)  # , verbose=verbose)
+                # print '*',
+                sys.stdout.flush()
+                if result['changes'] > 0:
                         getMetrics(d.b_blob, result, verbose=True)
                         results.append(result)
                         if verbose:

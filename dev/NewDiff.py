@@ -75,7 +75,7 @@
 #
 
 import ast
-from pprint import pprint
+# from pprint import pprint
 import collections
 import re
 import itertools
@@ -139,7 +139,8 @@ def compare_ast(node1, node2):
         return node1 == node2
 
 
-# from: http://stackoverflow.com/questions/3312989/elegant-way-to-test-python-asts-for-equality-not-reference-or-object-identity
+# from: http://stackoverflow.com/questions/3312989/
+# elegant-way-to-test-python-asts-for-equality-not-reference-or-object-identity
 
 def old_compare_ast(node1, node2, debug=True):
     if type(node1) is not type(node2):
@@ -692,7 +693,8 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree,
             candidatePairs = []
             for i in tree['subtreesIdx']:
                 if 'pair' in idxTree[i]:
-                    # print 'subtree match', idxTree[i]['idxSelf'], idxTree[i]['pair']
+                    # print 'subtree match', idxTree[i]['idxSelf'],
+                    # print idxTree[i]['pair']
                     # print '      parents', idxTree[i]['idxParent'],
                     # print otherIdxTree[idxTree[i]['pair']]['idxParent']
                     if (otherIdxTree[idxTree[i]['pair']]['idxParent']
@@ -715,7 +717,8 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree,
                 return
 
     if len(pairs) > 1:
-        print 'Too many pairs', len(pairs), thisSide
+        if verbose:
+            print 'Too many pairs', len(pairs), thisSide
 
         # if still not resolved, try using a majority vote among candidates
         # with compatible parents
@@ -740,7 +743,8 @@ def computePairs(tree, tokenMap, idxTree, otherIdxTree,
             cleanup_matches(tree, pairs, idxTree,
                             otherIdxTree, tokenMap)
         else:
-            print 'Unable to identify pair'
+            if verbose:
+                print 'Unable to identify pair'
             # remove all overlapping tokens
             cleanup_matches(tree, pairs, idxTree,
                             otherIdxTree, tokenMap)

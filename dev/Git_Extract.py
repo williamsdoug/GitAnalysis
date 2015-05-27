@@ -131,7 +131,7 @@
 #
 
 import git
-from pprint import pprint
+# from pprint import pprint
 import collections
 import re
 import datetime
@@ -435,7 +435,7 @@ def parse_msg(msg, patch=False):
 
     if patch:
         for line in msg.split('\n'):
-            lline = line.lower()
+            # lline = line.lower()
             if line.startswith('From: '):
                 try:
                     result['pAuth'] = '<git.Actor "'
@@ -607,10 +607,12 @@ def parse_diff(diff_text, proximity_limit=4):
             if m:
                 n_start = int(m.group('nstart'))
                 n_pos = n_start
+                """
                 try:
                     n_len = int(m.group('nlen'))
                 except Exception:
                     n_len = 0
+                """
                 p_start = int(m.group('pstart'))
                 p_pos = p_start
                 try:
@@ -815,7 +817,7 @@ def build_git_commits(project, update=True, include_patch=False,
     """
 
     annotate_children(commits)   # note parent/child relationships
-    save_git_commits(commits, project_to_fname(project))
+    save_git_commits(commits, project)
 
 
 def save_git_commits(commits, project):
@@ -1057,6 +1059,7 @@ def assign_blame(path, diff_text, p_cid, repo_name, child_cid):
 # still be used
 #
 
+
 def process_commit_details(cid, repo, repo_name, filter_config):
     """Process individual commit, computing diff and identifying blame.
        Exclude non-source files
@@ -1086,7 +1089,7 @@ def process_commit_details(cid, repo, repo_name, filter_config):
     else:
         output = []
 
-    blame = [p.get() for p in output]
+    blame = [parent.get() for parent in output]
     pool.close()
     pool.join()
     return dict(blame)
@@ -1165,10 +1168,10 @@ def find_legacy_cutoff(commits, verbose=False):
                 commit_date = int(c['date'])
                 if ('review@openstack.org' in c['committer'] or
                     'openstack-infra@' in c['committer'] or
-                    'change_id' in c and c['change_id']):
-                        if commit_date < first_with_date:
-                            first_with_date = commit_date
-                            first_with = k
+                        'change_id' in c and c['change_id']):
+                    if commit_date < first_with_date:
+                        first_with_date = commit_date
+                        first_with = k
                 else:
                     if commit_date > last_without_date:
                         last_without_date = commit_date
@@ -1514,12 +1517,12 @@ def compute_git_actor_dedupe(commits, runaway=10, verbose=False):
             # See if it overlaps with any already selected alias
             for i, current in enumerate(new_alias):
                 if (current['names'].intersection(this_alias['names'])
-                    or current['email'].intersection(this_alias['email'])):
-                        merged = True
-                        new_alias[i]['names'] = \
-                            current['names'].union(this_alias['names'])
-                        new_alias[i]['email'] = \
-                            current['email'].union(this_alias['email'])
+                        or current['email'].intersection(this_alias['email'])):
+                    merged = True
+                    new_alias[i]['names'] = \
+                        current['names'].union(this_alias['names'])
+                    new_alias[i]['email'] = \
+                        current['email'].union(this_alias['email'])
             if not merged:
                 new_alias.append(this_alias)
 
