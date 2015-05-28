@@ -5,7 +5,7 @@
 #
 # Currently configured for OpenStack, tested with Nova.
 #
-# Last updated 5/14/2015
+# Last updated 5/28/2015
 #
 # History:
 # - 9/2/14:  Initial version (initially contained in NovaSampleData).
@@ -44,6 +44,7 @@
 # - 4/26/15 - Integrate language_specific features
 # - 5/14/15 - Integrate with NewDiff, remove proximity in
 #             blame_compute_normalized_guilt(), adds error handling.
+# - 5/28/15 - Added support for ignore flag
 #
 #
 # Top Level Routines:
@@ -69,7 +70,7 @@ import re
 import math
 import numpy as np
 
-from sklearn.preprocessing import StandardScaler
+# from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.feature_extraction import DictVectorizer
 
@@ -83,7 +84,7 @@ from Git_Extract import build_git_commits, load_git_commits
 from Git_Extract import filter_bug_fix_combined_commits
 from Git_Extract import project_to_fname
 from Git_Extract import compute_git_actor_dedupe
-from jp_load_dump import convert_to_builtin_type, jload, jdump
+from jp_load_dump import jload, jdump
 
 
 # import sys
@@ -600,8 +601,9 @@ def extract_features_helper(combined_commits,
         raise Exception('extract_features: Invalid limit value ' + str(limit))
 
     selected_cid = [[k, c['order']] for k, c in combined_commits.items()
-                    if (c['reachable'] and c['order'] >= min_order
-                    and c['order'] <= max_order)]
+                    if (c['reachable'] and 'ignore' not in c
+                        and c['order'] >= min_order
+                        and c['order'] <= max_order)]
 
     # generate data to support actor dedupe
     git_actor_dedupe_table = compute_git_actor_dedupe(combined_commits)

@@ -990,7 +990,7 @@ def annotate_commit_reachability(project, commits, sampling_freq=25):
 
 
 def prune_empty_commits(commits, legacy_cutoff):
-    """Removes commits where all fles previously filtered
+    """Removes commits where all files previously filtered
        by making unreachable"""
     reachable_empty_commits = [k for k, c in commits.items()
                                if c['on_master_branch']
