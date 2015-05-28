@@ -6,7 +6,7 @@ Code for Git Analytics
 Copyright Doug Williams, 2015
 
 
-Development notes and summary results can be found in [_README Notebook](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb)
+Development notes and summary results can be found in [_README.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb) Notebook
 
 Sample analysis data can be found at [williamsdoug/GitAnalyticsDatasets](https://github.com/williamsdoug/GitAnalyticsDatasets)
 - [Various Dataset Sizes](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Dataset_Sizes.ipynb)
