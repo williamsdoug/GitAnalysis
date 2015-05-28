@@ -49,4 +49,5 @@ Changes
 =======
 
 3/12/2015: Major update
+
 5/28/2105:  Clean-up notebooks, new python aware diff routine, language-specific features, Theano-based NN
