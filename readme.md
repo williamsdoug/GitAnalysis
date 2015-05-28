@@ -33,8 +33,7 @@ Performance of individual solvers:
 
 Others, may be a bit rough:
 - [Composite learner using boosting](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Composite_Learner.ipynb)
-- Neural Networks using Multi-Layer Perceptron:[First Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/MLP_Round_1.ipynb) and [Second Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/MLP_Round_2.ipynb) and [Various topologies using Theano]
-- [Neural Networks using Theano](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Curves_Theano_NN-NetworkSize.ipynb)
+- Neural Networks using Multi-Layer Perceptron:[First Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/MLP_Round_1.ipynb) and [Second Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/MLP_Round_2.ipynb) and [Various topologies using Theano](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Curves_Theano_NN-NetworkSize.ipynb)
 
 ./dev includes all python code.
 Additional information can be found in [_README Notebook](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb)
