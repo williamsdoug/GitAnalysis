@@ -5,6 +5,9 @@ Code for Git Analytics
 
 Copyright Doug Williams, 2015
 
+
+Development notes and summary results can be found in [_README Notebook](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb)
+
 Sample analysis data can be found at [williamsdoug/GitAnalyticsDatasets](https://github.com/williamsdoug/GitAnalyticsDatasets)
 - [Various Dataset Sizes](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Dataset_Sizes.ipynb)
 - See: IPython notebook [OpenStack_Sample_Data.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/OpenStack_Sample_Data.ipynb) for examples of each record format.
@@ -35,8 +38,7 @@ Others, may be a bit rough:
 - [Composite learner using boosting](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Composite_Learner.ipynb)
 - Neural Networks using Multi-Layer Perceptron:[First Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/MLP_Round_1.ipynb) and [Second Attempt](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/MLP_Round_2.ipynb) and [Various topologies using Theano](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Curves_Theano_NN-NetworkSize.ipynb)
 
-./dev includes all python code.
-Additional information can be found in [_README Notebook](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb)
+Python source code located in: ./dev
 
 Configuration file located at: ./dev/git_analysis_config.py
 
