@@ -220,6 +220,11 @@ def build_nn(model, dimensions=[], update='sgd',
                                                name='bias')],
                               outputs=y_x, allow_input_downcast=True,
                               on_unused_input='warn')
+    rawPredict = theano.function(inputs=[X, Param(bias,
+                                                  default=np.array([0.0, 0.0]),
+                                                  name='bias')],
+                                 outputs=py_x, allow_input_downcast=True,
+                                 on_unused_input='warn')
 
     if len(dimensions) == 3:
         get_weights = theano.function(inputs=[], outputs=[w_h, w_o],
@@ -243,7 +248,7 @@ def build_nn(model, dimensions=[], update='sgd',
     # Return Solver and weight accessor Functions
     #
 
-    return train, predict, get_weights, set_weights
+    return train, predict, rawPredict, get_weights, set_weights
 
 
 #
@@ -343,7 +348,7 @@ def test_nn(model, trX, teX, trY, teY,
     if min_lr is False:
         min_lr = lr
 
-    (train, predict, get_weights,
+    (train, predict, rawPredict, get_weights,
      set_weights) = build_nn(model, dimensions=dimensions,
                              update=update,
                              uses_dropout=uses_dropout,
@@ -415,7 +420,7 @@ def test_nn(model, trX, teX, trY, teY,
                 print_stats(i, cost, TP, FP, FN, TN, precision, recall, f1)
                 print
                 sys.stdout.flush()
-                return predict, best_weights, best_f1
+                return predict, rawPredict, best_weights, best_f1
             print
             print ('{0}: Resetting to iteration {1},'
                    ' LR now {2:f}').format(i, best_i, lr)
@@ -447,4 +452,4 @@ def test_nn(model, trX, teX, trY, teY,
     print
     sys.stdout.flush()
 
-    return predict, best_weights, best_f1
+    return predict, rawPredict, best_weights, best_f1

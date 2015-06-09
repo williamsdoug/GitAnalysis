@@ -1,4 +1,9 @@
-# Plotting Routines and other helpers
+#
+# ml_plot.py Machine Learner Plotting Routines and other helpers
+#
+# Author:  Doug Williams - Copyright 2015
+#
+# Last updated 6/9/2015
 #
 # from ml_plot import plot_validation_curve, plot_learning_curve
 # from ml_plot import get_datasets, eval_clf, eval_predictions
@@ -6,10 +11,13 @@
 # from ml_plot import PredictCV_TrainTestValidate
 # from ml_plot import my_plot_learning_curve
 # from ml_plot import plot_prediction_curve
+# from ml_plot import getClassifierProbs
+# from ml_plot import plotThresholdDistribuition, plotPredictionStats
 
 import matplotlib.pyplot as plt
 import numpy as np
 import random
+import sys
 
 from sklearn.learning_curve import learning_curve
 from sklearn.learning_curve import validation_curve
@@ -484,3 +492,144 @@ def plot_prediction_curve(estimator, title, X, y, ylim=None,
 
     plt.legend(loc="best")
     return plt
+
+
+#
+# Functions to explore a predictors probability Functions
+#
+
+def getClassifierProbs(clf, X, Y, history=2000, future=500, n_iter=10):
+    """Gets probabilities for a given classifier"""
+    results = []
+    for (X_train, Y_train,
+         X_test, Y_test) in PredictCV_TrainTest(X, Y,  history=history,
+                                                future=future, n_iter=n_iter):
+
+        clf.fit(X_train, Y_train)
+        y_predict = clf.predict(X_test)
+        y_prob = clf.predict_proba(X_test)
+        y_log_prob = clf.predict_proba(X_test)
+
+        results.append({'Y_test': Y_test, 'y_predict': y_predict,
+                        'y_prob': y_prob, 'y_log_prob': y_log_prob})
+        print '*',
+        sys.stdout.flush()
+    return results
+
+
+def applyThreshold(results, thresh, verbose=True):
+    """Apply threshold to a predicted probabilities and compute statistics"""
+    total_pos = 0
+    total_TP = 0
+    total_FP = 0
+    total_FN = 0
+    for r in results:
+        Y_test = r['Y_test']
+        y_predict = r['y_predict']
+        y_prob = r['y_prob']
+        # y_log_prob = r['y_log_prob']
+
+        total_pos += sum(Y_test)
+        total_TP += sum([1 for i in range(len(Y_test))
+                         if y_prob[i, 1] >= thresh
+                         and Y_test[i] and y_predict[i]])
+        total_FP += sum([1 for i in range(len(Y_test))
+                         if y_prob[i, 1] >= thresh
+                         and not Y_test[i] and y_predict[i]])
+        total_FN += sum([1 for i in range(len(Y_test))
+                         if y_prob[i, 1] >= thresh
+                         and Y_test[i] and not y_predict[i]])
+    try:
+        recall = float(total_TP)/float(total_pos)
+        precision = float(total_TP)/float(total_TP + total_FP)
+
+        F1 = 2.0 * precision * recall / (precision + recall)
+        if verbose:
+            print 'Results for threshold:', thresh
+            print ('TP: {0:4d}    FP: {1:4d} \nFN: {2:4d} \n\nTotalPos:{3:4d}'
+                   .format(total_TP, total_FP, total_FN, total_pos))
+            print ('Precision: {:0.2f}  Recall: {:0.2f},  F1: {:0.2f}'
+                   .format(precision, recall, F1))
+            print
+            print
+        return {'thresh': thresh, 'precision': precision,
+                'recall': recall, 'F1': F1,
+                'TP': total_TP, 'FP': total_FP, 'FN': total_FN}
+    except Exception:
+        if verbose:
+            print 'Results for threshold:', thresh
+            print '   *** Skipped due to divide by zero ***'
+            print
+        return None
+
+
+def plotThresholdDistribuition(results):
+    """Shows histograms of predicted probability values"""
+    plt.figure(figsize=(8, 3))
+    plt.title('Commits by Prediction')
+    plt.xlabel('y_prob')
+    plt.ylabel('commits')
+    plt.hist([y[1] for r in results for y in r['y_prob']], bins=40)
+    plt.show()
+
+    plt.figure(figsize=(8, 3))
+    plt.title('Commits by Prediction for True')
+    plt.xlabel('y_prob')
+    plt.ylabel('commits')
+    plt.hist([y[1] for r in results for i, y in enumerate(r['y_prob'])
+              if r['Y_test'][i]], bins=40)
+    plt.show()
+
+    plt.figure(figsize=(8, 3))
+    plt.title('Commits by Prediction for False')
+    plt.xlabel('y_prob')
+    plt.ylabel('commits')
+    plt.hist([y[1] for r in results for i, y in enumerate(r['y_prob'])
+              if not r['Y_test'][i]], bins=40)
+    plt.show()
+
+
+def plotPredictionStats(results, verbose=False):
+    """Plots Precision, Recall and F1 based in predictor probabilities"""
+
+    predictionStats = [applyThreshold(results, thresh, verbose=False)
+                       for thresh in np.arange(1.0, 0.0, -0.05)]
+
+    x = [stat['thresh'] for stat in predictionStats if stat]
+
+    plt.figure(figsize=(8, 3))
+    plt.title('Classifier Results vs Threshold')
+    plt.xlabel('TP/FP/FN')
+    plt.ylabel('F1')
+    y_TP = [stat['TP'] for stat in predictionStats if stat]
+    y_FP = [stat['FP'] for stat in predictionStats if stat]
+    y_FN = [stat['FN'] for stat in predictionStats if stat]
+    plt.plot(x, y_TP, 'g', label='TP')
+    plt.plot(x, y_FP, 'r', label='FP')
+    plt.plot(x, y_FN, 'b', label='FN')
+    plt.legend(loc='upper right', shadow=True)
+    plt.show()
+
+    plt.figure(figsize=(8, 3))
+    plt.title('Precision vs Threshold')
+    plt.xlabel('threshold')
+    plt.ylabel('Precision')
+    y = [stat['precision'] for stat in predictionStats if stat]
+    plt.plot(x, y)
+    plt.show()
+
+    plt.figure(figsize=(8, 3))
+    plt.title('Recall vs Threshold')
+    plt.xlabel('threshold')
+    plt.ylabel('Recall')
+    y = [stat['recall'] for stat in predictionStats if stat]
+    plt.plot(x, y)
+    plt.show()
+
+    plt.figure(figsize=(8, 3))
+    plt.title('F1 vs Threshold')
+    plt.xlabel('threshold')
+    plt.ylabel('F1')
+    y = [stat['F1'] for stat in predictionStats if stat]
+    plt.plot(x, y)
+    plt.show()
