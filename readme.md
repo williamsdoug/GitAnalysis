@@ -8,6 +8,8 @@ Copyright Doug Williams, 2015
 
 Development notes and summary results can be found in [_README.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb) Notebook
 
+
+
 Sample analysis data can be found at [williamsdoug/GitAnalyticsDatasets](https://github.com/williamsdoug/GitAnalyticsDatasets)
 - [Various Dataset Sizes](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Dataset_Sizes.ipynb)
 - See: IPython notebook [OpenStack_Sample_Data.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/OpenStack_Sample_Data.ipynb) for examples of each record format.
@@ -19,6 +21,9 @@ Analysis Notebooks for Various OpenStack Projects:
 - [Nova](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Analysis_of_Nova.ipynb)
 - [Swift](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Analysis_of_Swift.ipynb)
 
+
+Overall Solver Performance:
+- [Solver performance vs probability for Nova](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/ProbabilityCurves.ipynb)
 
 Performance of individual solvers:
 
@@ -50,4 +55,5 @@ Changes
 
 3/12/2015: Major update
 
-5/28/2105:  Clean-up notebooks, new python aware diff routine, language-specific features, Theano-based NN
+5/28/2015:  Clean-up notebooks, new python aware diff routine, language-specific features, Theano-based NN
+6/10/2015:  Add notebook with prediction probability curves

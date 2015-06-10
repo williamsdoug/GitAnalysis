@@ -3,7 +3,7 @@
 #
 # Author:  Doug Williams - Copyright 2015
 #
-# Last updated 6/9/2015
+# Last updated 6/10/2015
 #
 # from ml_plot import plot_validation_curve, plot_learning_curve
 # from ml_plot import get_datasets, eval_clf, eval_predictions
@@ -13,6 +13,7 @@
 # from ml_plot import plot_prediction_curve
 # from ml_plot import getClassifierProbs
 # from ml_plot import plotThresholdDistribuition, plotPredictionStats
+# from ml_plot import plotCombinedResults
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -599,37 +600,77 @@ def plotPredictionStats(results, verbose=False):
 
     plt.figure(figsize=(8, 3))
     plt.title('Classifier Results vs Threshold')
-    plt.xlabel('TP/FP/FN')
-    plt.ylabel('F1')
+    plt.xlabel('Threshold')
+    plt.ylabel('TP/FP/FN')
     y_TP = [stat['TP'] for stat in predictionStats if stat]
     y_FP = [stat['FP'] for stat in predictionStats if stat]
     y_FN = [stat['FN'] for stat in predictionStats if stat]
     plt.plot(x, y_TP, 'g', label='TP')
     plt.plot(x, y_FP, 'r', label='FP')
     plt.plot(x, y_FN, 'b', label='FN')
-    plt.legend(loc='upper right', shadow=True)
+    plt.legend(loc='upper right', shadow=False)
     plt.show()
 
     plt.figure(figsize=(8, 3))
-    plt.title('Precision vs Threshold')
-    plt.xlabel('threshold')
+    plt.title('Precision, Recall and F1 vs Threshold')
+    plt.xlabel('Threshold')
+    plt.ylabel('Precision/Recall/F1')
+    y_prec = [stat['precision'] for stat in predictionStats if stat]
+    plt.plot(x, y_prec, 'g', label='Precision')
+    y_recall = [stat['recall'] for stat in predictionStats if stat]
+    plt.plot(x, y_recall, 'b', label='Recall')
+    y_f1 = [stat['F1'] for stat in predictionStats if stat]
+    plt.plot(x, y_f1, 'r', label='F1')
+    plt.legend(loc='upper right', shadow=False)
+    plt.show()
+
+
+def plotCombinedResults(all_results, verbose=False):
+    """Plots TP and FP for all predictors based on prediction probabilities"""
+
+    all_meta = {'LR': {'marker': 'g', 'legend': 'LR',
+                       'TP_marker': 'g', 'FP_marker': 'g--',
+                       'TP_legend': 'LR - TP', 'FP_legend': 'LR - FP'},
+                'svc': {'marker': 'r', 'legend': 'SVC',
+                        'TP_marker': 'r', 'FP_marker': 'r--',
+                        'TP_legend': 'SVC - TP', 'FP_legend': 'SVC - FP'},
+                'sgd': {'marker': 'b', 'legend': 'SGD',
+                        'TP_marker': 'b', 'FP_marker': 'b--',
+                        'TP_legend': 'SGD - TP', 'FP_legend': 'SGD - FP'},
+                'adaboost': {'marker': 'm', 'legend': 'Adaboost',
+                             'TP_marker': 'm', 'FP_marker': 'm--',
+                             'TP_legend': 'Adaboost - TP',
+                             'FP_legend': 'Adaboost - FP'}
+                }
+    predictionStats = {}
+    for k in all_meta.keys():
+        predictionStats[k] = [applyThreshold(all_results[k],
+                                             thresh, verbose=False)
+                              for thresh in np.arange(1.0, 0.0, -0.05)]
+
+    plt.figure(figsize=(8, 5))
+    plt.title('Classifier Results vs Threshold')
+    plt.xlabel('Threshold')
+    plt.ylabel('TP/FP/FN')
+    for k, meta in all_meta.items():
+        x = [stat['thresh'] for stat in predictionStats[k] if stat]
+        y_TP = [stat['TP'] for stat in predictionStats[k] if stat]
+        y_FP = [stat['FP'] for stat in predictionStats[k] if stat]
+        # y_FN = [stat['FN'] for stat in predictionStats[k] if stat]
+        plt.plot(x, y_TP, meta['TP_marker'], label=meta['TP_legend'])
+        plt.plot(x, y_FP, meta['FP_marker'], label=meta['FP_legend'])
+        # plt.plot(x, y_FN, 'b', label='FN')
+    plt.legend(loc='upper right', shadow=False)
+    plt.show()
+
+    plt.figure(figsize=(8, 5))
+    plt.title('Classifier Precision vs Threshold')
+    plt.xlabel('Threshold')
     plt.ylabel('Precision')
-    y = [stat['precision'] for stat in predictionStats if stat]
-    plt.plot(x, y)
-    plt.show()
-
-    plt.figure(figsize=(8, 3))
-    plt.title('Recall vs Threshold')
-    plt.xlabel('threshold')
-    plt.ylabel('Recall')
-    y = [stat['recall'] for stat in predictionStats if stat]
-    plt.plot(x, y)
-    plt.show()
-
-    plt.figure(figsize=(8, 3))
-    plt.title('F1 vs Threshold')
-    plt.xlabel('threshold')
-    plt.ylabel('F1')
-    y = [stat['F1'] for stat in predictionStats if stat]
-    plt.plot(x, y)
+    for k, meta in all_meta.items():
+        x = [stat['thresh'] for stat in predictionStats[k] if stat]
+        y = [stat['precision'] for stat in predictionStats[k] if stat]
+        # y_FN = [stat['FN'] for stat in predictionStats[k] if stat]
+        plt.plot(x, y, meta['marker'], label=meta['legend'])
+    plt.legend(loc='upper left', shadow=False)
     plt.show()
