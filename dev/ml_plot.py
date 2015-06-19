@@ -3,7 +3,10 @@
 #
 # Author:  Doug Williams - Copyright 2015
 #
-# Last updated 6/10/2015
+# Last updated 6/16/2015
+#
+# History:
+# 6/16/15 - Add support for random number seed param for reproducable results
 #
 # from ml_plot import plot_validation_curve, plot_learning_curve
 # from ml_plot import get_datasets, eval_clf, eval_predictions
@@ -63,9 +66,13 @@ class PredictCV(object):
 
     n_iter : int, default=10
         Number of folds. Must be at least 2.
+
+    seed: : int, default=None
+        Optional seed for random number generator
     """
 
-    def __init__(self, n, history=200, future=50, ignore=0.1, n_iter=10):
+    def __init__(self, n, history=200, future=50, ignore=0.1,
+                 n_iter=10, seed=None):
         if n <= 0:
             raise Exception('Invalid value for n')
         if n_iter <= 0:
@@ -79,6 +86,7 @@ class PredictCV(object):
         self.history = history
         self.future = future
         self.n_iter = n_iter
+        self.seed = seed
 
         if type(ignore) is float and ignore >= 0.0 and ignore < 1.0:
             self.n = int(n*(1.0 - ignore))
@@ -95,6 +103,9 @@ class PredictCV(object):
             # raise Exception('history + future exceeds n')
 
     def __iter__(self):
+        if isinstance(self.seed, int):
+            random.seed(self.seed)
+
         for i in range(self.n_iter):
             start = random.randint(self.history, self.n-self.future)
             yield np.arange(start - self.history, start), \
@@ -186,13 +197,14 @@ def eval_clf(clf, X, Y, verbose=True, title=False):
             'confusion': confusion}
 
 
-def eval_predictions(clf, X, Y, history_sizes=[], future_sizes=[], n_iter=10):
+def eval_predictions(clf, X, Y, history_sizes=[], future_sizes=[],
+                     n_iter=10, seed=None):
     all_results = []
     for history in history_sizes:
         for future in future_sizes:
             results = []
             cv = PredictCV(len(Y), history=history, future=future,
-                           n_iter=n_iter)
+                           n_iter=n_iter, seed=seed)
             title = '** Predictions for hist=' + str(history) \
                     + ' future='+str(future) + ' **'
             for train_idx, test_idx in cv:
@@ -354,7 +366,7 @@ def my_plot_learning_curve(estimator, title, X, y, ylim=None,
                            n_jobs=1, future=100, scoring='f1',
                            history_sizes=[50, 100, 200, 300,
                                           400, 500, 1000],
-                           n_iter=10):
+                           n_iter=10, seed=None):
     """
     Generate a simple plot of the test learning curve.
 
@@ -404,7 +416,8 @@ def my_plot_learning_curve(estimator, title, X, y, ylim=None,
     for h in history_sizes:
         scores = cross_val_score(estimator, X, y=y, scoring=scoring,
                                  cv=PredictCV(len(y), history=h,
-                                              future=future, n_iter=n_iter),
+                                              future=future, n_iter=n_iter,
+                                              seed=seed),
                                  n_jobs=n_jobs)
 
         test_scores_mean.append(np.mean(scores))
@@ -426,7 +439,7 @@ def my_plot_learning_curve(estimator, title, X, y, ylim=None,
 def plot_prediction_curve(estimator, title, X, y, ylim=None,
                           n_jobs=1, history=500, scoring='f1',
                           future_sizes=[50, 100, 200, 300, 500],
-                          n_iter=10):
+                          n_iter=10, seed=None):
     """
     Generate a simple plot of the test prediction curve.
 
@@ -476,7 +489,8 @@ def plot_prediction_curve(estimator, title, X, y, ylim=None,
     for f in future_sizes:
         scores = cross_val_score(estimator, X, y=y, scoring=scoring,
                                  cv=PredictCV(len(y), history=history,
-                                              future=f, n_iter=n_iter),
+                                              future=f, n_iter=n_iter,
+                                              seed=seed),
                                  n_jobs=n_jobs)
 
         test_scores_mean.append(np.mean(scores))
@@ -499,20 +513,24 @@ def plot_prediction_curve(estimator, title, X, y, ylim=None,
 # Functions to explore a predictors probability Functions
 #
 
-def getClassifierProbs(clf, X, Y, history=2000, future=500, n_iter=10):
+def getClassifierProbs(clf, X, Y, history=2000, future=500,
+                       n_iter=10, seed=None):
     """Gets probabilities for a given classifier"""
     results = []
     for (X_train, Y_train,
          X_test, Y_test) in PredictCV_TrainTest(X, Y,  history=history,
-                                                future=future, n_iter=n_iter):
+                                                future=future,
+                                                n_iter=n_iter, seed=seed):
 
         clf.fit(X_train, Y_train)
         y_predict = clf.predict(X_test)
         y_prob = clf.predict_proba(X_test)
+        yy_prob = y_prob[:, 1] - y_prob[:, 0]
         y_log_prob = clf.predict_proba(X_test)
 
         results.append({'Y_test': Y_test, 'y_predict': y_predict,
-                        'y_prob': y_prob, 'y_log_prob': y_log_prob})
+                        'y_prob_raw': y_prob, 'y_prob_net': yy_prob,
+                        'y_log_prob': y_log_prob})
         print '*',
         sys.stdout.flush()
     return results
@@ -526,20 +544,26 @@ def applyThreshold(results, thresh, verbose=True):
     total_FN = 0
     for r in results:
         Y_test = r['Y_test']
-        y_predict = r['y_predict']
-        y_prob = r['y_prob']
+        # y_predict = r['y_predict']
+        y_prob = r['y_prob_net']
         # y_log_prob = r['y_log_prob']
 
         total_pos += sum(Y_test)
         total_TP += sum([1 for i in range(len(Y_test))
-                         if y_prob[i, 1] >= thresh
-                         and Y_test[i] and y_predict[i]])
+                         # if y_prob[i, 1] >= thresh
+                         if y_prob[i] >= thresh
+                         # and Y_test[i] and y_predict[i]])
+                         and Y_test[i]])
         total_FP += sum([1 for i in range(len(Y_test))
-                         if y_prob[i, 1] >= thresh
-                         and not Y_test[i] and y_predict[i]])
+                         # if y_prob[i, 1] >= thresh
+                         if y_prob[i] >= thresh
+                         # and not Y_test[i] and y_predict[i]])
+                         and not Y_test[i]])
         total_FN += sum([1 for i in range(len(Y_test))
-                         if y_prob[i, 1] >= thresh
-                         and Y_test[i] and not y_predict[i]])
+                         # if y_prob[i, 1] >= thresh
+                         if y_prob[i] < thresh
+                         # and Y_test[i] and not y_predict[i]])
+                         and Y_test[i]])
     try:
         recall = float(total_TP)/float(total_pos)
         precision = float(total_TP)/float(total_TP + total_FP)
@@ -570,14 +594,14 @@ def plotThresholdDistribuition(results):
     plt.title('Commits by Prediction')
     plt.xlabel('y_prob')
     plt.ylabel('commits')
-    plt.hist([y[1] for r in results for y in r['y_prob']], bins=40)
+    plt.hist([y for r in results for y in r['y_prob_net']], bins=40)
     plt.show()
 
     plt.figure(figsize=(8, 3))
     plt.title('Commits by Prediction for True')
     plt.xlabel('y_prob')
     plt.ylabel('commits')
-    plt.hist([y[1] for r in results for i, y in enumerate(r['y_prob'])
+    plt.hist([y for r in results for i, y in enumerate(r['y_prob_net'])
               if r['Y_test'][i]], bins=40)
     plt.show()
 
@@ -585,7 +609,7 @@ def plotThresholdDistribuition(results):
     plt.title('Commits by Prediction for False')
     plt.xlabel('y_prob')
     plt.ylabel('commits')
-    plt.hist([y[1] for r in results for i, y in enumerate(r['y_prob'])
+    plt.hist([y for r in results for i, y in enumerate(r['y_prob_net'])
               if not r['Y_test'][i]], bins=40)
     plt.show()
 
@@ -594,7 +618,7 @@ def plotPredictionStats(results, verbose=False):
     """Plots Precision, Recall and F1 based in predictor probabilities"""
 
     predictionStats = [applyThreshold(results, thresh, verbose=False)
-                       for thresh in np.arange(1.0, 0.0, -0.05)]
+                       for thresh in np.arange(1.0, -0.125, -0.025)]
 
     x = [stat['thresh'] for stat in predictionStats if stat]
 
@@ -602,6 +626,8 @@ def plotPredictionStats(results, verbose=False):
     plt.title('Classifier Results vs Threshold')
     plt.xlabel('Threshold')
     plt.ylabel('TP/FP/FN')
+    plt.xlim(xmin=-0.10)
+    plt.grid(True)
     y_TP = [stat['TP'] for stat in predictionStats if stat]
     y_FP = [stat['FP'] for stat in predictionStats if stat]
     y_FN = [stat['FN'] for stat in predictionStats if stat]
@@ -615,6 +641,8 @@ def plotPredictionStats(results, verbose=False):
     plt.title('Precision, Recall and F1 vs Threshold')
     plt.xlabel('Threshold')
     plt.ylabel('Precision/Recall/F1')
+    plt.xlim(xmin=-0.10)
+    plt.grid(True)
     y_prec = [stat['precision'] for stat in predictionStats if stat]
     plt.plot(x, y_prec, 'g', label='Precision')
     y_recall = [stat['recall'] for stat in predictionStats if stat]
@@ -628,49 +656,129 @@ def plotPredictionStats(results, verbose=False):
 def plotCombinedResults(all_results, verbose=False):
     """Plots TP and FP for all predictors based on prediction probabilities"""
 
-    all_meta = {'LR': {'marker': 'g', 'legend': 'LR',
-                       'TP_marker': 'g', 'FP_marker': 'g--',
-                       'TP_legend': 'LR - TP', 'FP_legend': 'LR - FP'},
-                'svc': {'marker': 'r', 'legend': 'SVC',
-                        'TP_marker': 'r', 'FP_marker': 'r--',
-                        'TP_legend': 'SVC - TP', 'FP_legend': 'SVC - FP'},
-                'sgd': {'marker': 'b', 'legend': 'SGD',
-                        'TP_marker': 'b', 'FP_marker': 'b--',
-                        'TP_legend': 'SGD - TP', 'FP_legend': 'SGD - FP'},
-                'adaboost': {'marker': 'm', 'legend': 'Adaboost',
-                             'TP_marker': 'm', 'FP_marker': 'm--',
-                             'TP_legend': 'Adaboost - TP',
-                             'FP_legend': 'Adaboost - FP'}
-                }
+    all_meta = [{'marker': 'g', 'TP_marker': 'g', 'FP_marker': 'g--'},
+                {'marker': 'r', 'TP_marker': 'r', 'FP_marker': 'r--'},
+                {'marker': 'b', 'TP_marker': 'b', 'FP_marker': 'b--'},
+                {'marker': 'm', 'TP_marker': 'm', 'FP_marker': 'm--'},
+                {'marker': 'y', 'TP_marker': 'y', 'FP_marker': 'y--'},
+                {'marker': 'k', 'TP_marker': 'k', 'FP_marker': 'k--'},
+                ]
+
     predictionStats = {}
-    for k in all_meta.keys():
+    for k in all_results.keys():
         predictionStats[k] = [applyThreshold(all_results[k],
                                              thresh, verbose=False)
-                              for thresh in np.arange(1.0, 0.0, -0.05)]
+                              for thresh in np.arange(1.0, -0.125, -0.025)]
 
-    plt.figure(figsize=(8, 5))
-    plt.title('Classifier Results vs Threshold')
-    plt.xlabel('Threshold')
-    plt.ylabel('TP/FP/FN')
-    for k, meta in all_meta.items():
-        x = [stat['thresh'] for stat in predictionStats[k] if stat]
-        y_TP = [stat['TP'] for stat in predictionStats[k] if stat]
-        y_FP = [stat['FP'] for stat in predictionStats[k] if stat]
-        # y_FN = [stat['FN'] for stat in predictionStats[k] if stat]
-        plt.plot(x, y_TP, meta['TP_marker'], label=meta['TP_legend'])
-        plt.plot(x, y_FP, meta['FP_marker'], label=meta['FP_legend'])
-        # plt.plot(x, y_FN, 'b', label='FN')
+    for ii in range(0, len(all_results), len(all_meta)):
+        plt.figure(figsize=(8, 8))
+        plt.title('Classifier Results vs Threshold')
+        plt.xlabel('Threshold')
+        plt.ylabel('TP/FP/FN')
+        plt.xlim(xmin=-0.10)
+        plt.grid(True)
+        for i, k in enumerate(predictionStats.keys()[ii:ii+len(all_meta)]):
+            meta = all_meta[i]
+            x = [stat['thresh'] for stat in predictionStats[k] if stat]
+            y_TP = [stat['TP'] for stat in predictionStats[k] if stat]
+            y_FP = [stat['FP'] for stat in predictionStats[k] if stat]
+            # y_FN = [stat['FN'] for stat in predictionStats[k] if stat]
+            plt.plot(x, y_TP, meta['TP_marker'], label='{} - TP'.format(k))
+            plt.plot(x, y_FP, meta['FP_marker'], label='{} - FP'.format(k))
+            # plt.plot(x, y_FN, 'b', label='FN')
+        plt.legend(loc='upper right', shadow=False)
+        plt.show()
+
+    for ii in range(0, len(all_results), len(all_meta)):
+        plt.figure(figsize=(8, 8))
+        plt.title('Classifier Precision vs Threshold')
+        plt.xlabel('Threshold')
+        plt.ylabel('Precision')
+        plt.xlim(xmin=-0.10)
+        plt.grid(True)
+        for i, k in enumerate(predictionStats.keys()[ii:ii+len(all_meta)]):
+            meta = all_meta[i]
+            x = [stat['thresh'] for stat in predictionStats[k] if stat]
+            y = [stat['precision'] for stat in predictionStats[k] if stat]
+            # y_FN = [stat['FN'] for stat in predictionStats[k] if stat]
+            plt.plot(x, y, meta['marker'], label=k)
+        plt.legend(loc='upper left', shadow=False)
+        plt.show()
+
+
+def plotPrecisionRecallHeader(small=False):
+    """Helper function for protPrecisionRecall()"""
+    if small:
+        plt.figure(figsize=(5, 5))
+    else:
+        plt.figure(figsize=(8, 8))
+    plt.title('Precision vs Recall')
+    plt.xlabel('Precision')
+    plt.ylabel('Recall')
+    plt.xlim(xmin=0.1, xmax=0.8)
+    plt.ylim(ymin=0.1, ymax=0.8)
+
+
+def plotPrecisionRecallCurve(result, marker='b', label=None):
+    """Plots Precision vs Recall Curve for individual estimator"""
+
+    predictionStats = [applyThreshold(result, thresh, verbose=False)
+                       for thresh in np.arange(1.0, -0.525, -0.025)]
+
+    y_prec = [stat['precision'] for stat in predictionStats if stat]
+    y_recall = [stat['recall'] for stat in predictionStats if stat]
+    plt.plot(y_prec, y_recall, marker, label=label)
+
+
+def plotPrecisionRecall(result):
+    """Top level - plots precision vs recall for an individual result"""
+
+    plotPrecisionRecallHeader(small=True)
+    plotPrecisionRecallCurve(result)
+    # plt.legend(loc='upper right', shadow=False)
+    plt.show()
+
+
+def plotAllPrecisionRecall(results, keys=[]):
+    """Top level - plots precision vs recall for a set of results"""
+    if not keys:
+        keys = results.keys()
+    markers = ['r', 'b', 'g', 'y', 'c', 'm', 'k',
+               'r:', 'b:', 'g:', 'y:', 'c:', 'm:', 'k:',
+               'r--', 'b--', 'g--', 'y--', 'c--', 'm--', 'k--', ]
+
+    plotPrecisionRecallHeader()
+    for i, (k, v) in enumerate([(k, v) for k, v in results.items()
+                                if k in keys]):
+            plotPrecisionRecallCurve(v, marker=markers[i], label=k)
     plt.legend(loc='upper right', shadow=False)
     plt.show()
 
-    plt.figure(figsize=(8, 5))
-    plt.title('Classifier Precision vs Threshold')
-    plt.xlabel('Threshold')
-    plt.ylabel('Precision')
-    for k, meta in all_meta.items():
-        x = [stat['thresh'] for stat in predictionStats[k] if stat]
-        y = [stat['precision'] for stat in predictionStats[k] if stat]
-        # y_FN = [stat['FN'] for stat in predictionStats[k] if stat]
-        plt.plot(x, y, meta['marker'], label=meta['legend'])
-    plt.legend(loc='upper left', shadow=False)
+
+def showScatterProb(firstKey, secondKey, all_results):
+    """Scatter plot of two sets of probability predictions,
+    color signifies growntruth """
+    groundTruth = np.concatenate([r['Y_test']
+                                  for r in all_results[firstKey]])
+    firstProbs = np.concatenate([r['y_prob_net']
+                                 for r in all_results[firstKey]])
+    secondProbs = np.concatenate([r['y_prob_net']
+                                  for r in all_results[secondKey]])
+
+    fig = plt.figure(figsize=(8, 8))
+    plt.title('Ground Truth g = 1, r = 0')
+    plt.scatter([firstProbs[i]
+                 for i, gt in enumerate(groundTruth) if not gt],
+                [secondProbs[i]
+                 for i, gt in enumerate(groundTruth) if not gt],
+                marker='o', c='r', alpha=0.01)
+    plt.scatter([firstProbs[i]
+                 for i, gt in enumerate(groundTruth) if gt],
+                [secondProbs[i]
+                 for i, gt in enumerate(groundTruth) if gt],
+                marker='o', c='g', alpha=0.01)
+    plt.xlabel(firstKey)
+    plt.ylabel(secondKey)
+    plt.plot([0, 0], [-1, 1], 'r')
+    plt.plot([-1, 1], [0, 0], 'r')
     plt.show()
