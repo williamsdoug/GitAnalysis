@@ -6,9 +6,12 @@ Code for Git Analytics
 Copyright Doug Williams, 2015
 
 
-Development notes and summary results can be found in [_README.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb) Notebook
+Development notes and summary results can be found in [_README.ipynb](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/_README.ipynb) Notebook (needs update)
 
-
+Overall Estimator Performance:
+- [Estimator performance vs probability for Nova](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/CurvesPrecisionRecall%20-%20All%20Estimators.ipynb)
+ - [Build Script for Estimator Results](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/ComputeAllSolversIncludingCalibrate.ipynb)
+- [Estimator Performance vs Feature Reduction](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Curves_FeatureReduction_ProbCurves.ipynb)
 
 Sample analysis data can be found at [williamsdoug/GitAnalyticsDatasets](https://github.com/williamsdoug/GitAnalyticsDatasets)
 - [Various Dataset Sizes](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Dataset_Sizes.ipynb)
@@ -21,9 +24,6 @@ Analysis Notebooks for Various OpenStack Projects:
 - [Nova](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Analysis_of_Nova.ipynb)
 - [Swift](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/Analysis_of_Swift.ipynb)
 
-
-Overall Solver Performance:
-- [Solver performance vs probability for Nova](http://nbviewer.ipython.org/github/williamsdoug/GitAnalysis/blob/master/notebooks/ProbabilityCurves.ipynb)
 
 Performance of individual solvers:
 
