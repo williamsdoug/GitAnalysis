@@ -56,5 +56,7 @@ Changes
 3/12/2015: Major update
 
 5/28/2015:  Clean-up notebooks, new python aware diff routine, language-specific features, Theano-based NN
+
 6/10/2015:  Add notebook with prediction probability curves
+
 6/19/2015:  Add Precision/Recall curves
