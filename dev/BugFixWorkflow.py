@@ -37,6 +37,13 @@
 # - 5/13/15:  Integrate with NewDiff and new_language_feature.  (changes mostly
 #             in Git_Extract)
 # - 5/27/15 - Return legacy_cutoff as part of commit_postprocessing()
+# - 6/30/15 - Computes raw_guilt for all severities, defer selection of
+#             importance.  Use dummy importance in collect_all_bug_fix_commits
+#             Should remove importance parameter in collect_all_bug_fix_commits
+#             and all supporting functions.  new_annotate_guilt() now
+#             computes raw_guilt values for all bug severities
+# - 7/2/15 -  Computes aggregated guild for various sensitivity thresholds and
+#             weighting policies.  Old version sitll available via include_legacy flag.
 #
 # Top level routines:
 # from BugFixWorkflow import import_all_bugs
@@ -109,6 +116,11 @@ IMPORTANCE_BASE_LEVEL = {
     'all': -1,
 }
 
+
+AGGREGATED_VALUES = ['crit', 'high+', 'med+', 'low+']
+
+
+POLICY_VALUES = ['flat', 'linear', 'strong_exp', 'weak_exp']
 
 #
 # Code
@@ -729,6 +741,71 @@ def annotate_guilt(guilt_data, commits, limit=-1,
     print 'largest guilt:', max_guilt
 
 
+def new_annotate_guilt(guilt_data, commits, limit=-1,
+                       include_legacy=True,
+                       weight_importance_policy='linear'):
+    """Apply guilt data to commits
+    Includes legacy guilt computation, should delete in future version"""
+    global ALL_BUGS
+
+    ALL_SEVERITIES = ['Critical', 'High', 'Medium', 'Low']
+
+    for k, c in commits.items():  # Initialize
+        c['raw_guilt'] = {k: 0.0 for k in ALL_SEVERITIES}
+
+    if include_legacy:
+        for k, c in commits.items():  # Initialize
+            c['guilt'] = 0.0
+
+    for entry in guilt_data:
+        entry['all_importance'] = [ALL_BUGS[bug]['importance']
+                                   for bug in entry['bugs']]
+
+    for entry in guilt_data:
+        if not entry['blame']:   # skip empty entries
+            continue
+        limit -= 1
+        if limit == 0:
+            break
+
+        for commit_key, guilt in blame_compute_normalized_guilt(entry).items():
+            if include_legacy:
+                commits[commit_key]['guilt'] += guilt
+            for imp in entry['all_importance']:
+                commits[commit_key]['raw_guilt'][imp] += guilt
+
+    if include_legacy:
+        guilty = sum([1 for v in commits.values() if v['guilt'] > 0])
+        min_guilt = min([v['guilt']
+                         for v in commits.values() if v['guilt'] > 0])
+        max_guilt = max([v['guilt']
+                         for v in commits.values() if v['guilt'] > 0])
+
+    guilty_by_importance = {k: 0 for k in ALL_SEVERITIES}
+    min_guilt_by_importance = {k: 0.0 for k in ALL_SEVERITIES}
+    max_guilt_by_importance = {k: 0.0 for k in ALL_SEVERITIES}
+
+    for imp in ALL_SEVERITIES:
+        guilty_by_importance[imp] = sum([1 for v in commits.values()
+                                         if v['raw_guilt'][imp] > 0])
+        min_guilt_by_importance[imp] = min([v['raw_guilt'][imp]
+                                            for v in commits.values()
+                                            if v['raw_guilt'][imp] > 0])
+        max_guilt_by_importance[imp] = max([v['raw_guilt'][imp]
+                                            for v in commits.values()
+                                            if v['raw_guilt'][imp] > 0])
+        print imp, ':'
+        print '    entries with non-zero guilt: ', guilty_by_importance[imp]
+        print '    smallest guilt:', min_guilt_by_importance[imp]
+        print '    largest guilt:', max_guilt_by_importance[imp]
+
+    if include_legacy:
+        print 'Overall:'
+        print '    entries with non-zero guilt: ', guilty
+        print '    smallest guilt:', min_guilt
+        print '    largest guilt:', max_guilt
+
+
 def mark_selected_bug_fix_commits(guilt_data, commits):
     """Mark selected bug fix commits based on guilt data entries
        ignores empty bug fixes"""
@@ -770,11 +847,29 @@ def compute_selected_bug_fixes(commits, min_order=False, max_order=False,
                 and c['date'] <= max_time])
 
 
+def compute_total_guilt(commits):
+    """Computes aggregated guilt values for each feature vector
+    for a range of severity thresholds and severity weighting policies"""
+    for entry in commits.values():
+        entry['total_guilt'] = {policy: {} for policy in POLICY_VALUES}
+        for policy in POLICY_VALUES:
+            for importance in AGGREGATED_VALUES:
+                base = IMPORTANCE_BASE_LEVEL[importance]
+                entry['total_guilt'][policy][importance] = sum(
+                    [v * apply_weight_by_importance(BUG_WEIGHT_VALUES[severity]
+                                                    - base, policy=policy)
+                     for severity, v in entry['raw_guilt'].items()
+                     if BUG_WEIGHT_VALUES[severity] > base])
+
+
 def build_all_guilt(project, combined_commits,
-                    clear_cache=False, apply_guilt=True,
-                    importance='low+',
+                    clear_cache=False,
+                    apply_guilt=True,
+                    importance='low+',   # Ignored, should be deleted
                     wip='linear'):
     """Top level routine for Merge processing and guilt annotation"""
+
+    importance = 'low+'
 
     print 'Determining legacy cut-off'
     legacy_cutoff = find_legacy_cutoff(combined_commits, verbose=True)
@@ -797,8 +892,13 @@ def build_all_guilt(project, combined_commits,
         print len(missing_guilt_data)
     if apply_guilt:
         print 'Annotating Guilt'
+        """
         annotate_guilt(guilt_data, combined_commits,
                        weight_importance_policy=wip)
+        """
+        new_annotate_guilt(guilt_data, combined_commits,
+                           weight_importance_policy=wip)
+        compute_total_guilt(combined_commits)  # compute aggregated values
     mark_selected_bug_fix_commits(guilt_data, combined_commits)
     return guilt_data
 
